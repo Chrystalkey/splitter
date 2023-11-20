@@ -1,58 +1,34 @@
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::path::PathBuf;
+use std::string::ToString;
+use serde::{Deserialize, Serialize};
 use crate::config::SubCommand;
+use crate::error::{InternalSplitterError, TargetParsingError};
+use crate::logging::{LogEntry, LoggedCommand};
 
-type MemberID = usize;
+pub(crate) type TransactionChange = HashMap<String, i64>;
 
-#[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq)]
-enum Money {
-    Euro(u32),
-    USD(u32),
-}
-
-impl Into<f32> for Money {
-    fn into(self) -> f32 {
-        match self {
-            Self::Euro(cents) |
-            Self::USD(cents) => { cents as f32 / 100. }
-            _ => { panic!("Could not convert your currency"); }
-        }
-    }
-}
-
-impl ToString for Money {
-    fn to_string(&self) -> String {
-        match self {
-            Money::Euro(amount) => format!("{} €", amount),
-            Money::USD(amount) => format!("{} $", amount),
-            _ => { unreachable!() }
-        }
-    }
-}
-
-struct TransactionTodo {
-    amount: Money,
-    from: MemberID,
-    to: MemberID,
-}
-
-type TransactionChange = HashMap<String, Money>;
-
+#[derive(Serialize, Deserialize)]
 struct Member {
-    id: MemberID,
     name: String,
+    balance: i64,
 }
 
-struct LogEntry {
-    command: SubCommand,
-    change: Option<TransactionChange>,
+impl Member {
+    fn new(name: String) -> Self {
+        return Member {
+            name,
+            balance: 0,
+        };
+    }
 }
 
+
+#[derive(Serialize, Deserialize)]
 struct Group {
     name: String,
     members: Vec<Member>,
-    transaction_todos: Vec<TransactionTodo>,
     log: Vec<LogEntry>,
 }
 
@@ -62,7 +38,7 @@ impl Group {
             let mut vec = Vec::with_capacity(members.len());
             let mut index = 0;
             for m in members {
-                vec.push(Member { id: index, name: m });
+                vec.push(Member::new(m));
                 index += 1;
             }
             vec
@@ -70,54 +46,118 @@ impl Group {
         Self {
             name,
             members: membrs,
-            transaction_todos: vec![],
             log: vec![],
         }
     }
 }
 
+#[derive(Serialize, Deserialize)]
 struct SplitterState {
     groups: Vec<Group>,
 }
 
 impl SplitterState {
     fn parse(source: PathBuf) -> Self {
-        todo!();
+        todo!("Parsing from a persistence file not implemented");
     }
 }
 
 /// helper struct containing money and a name. Can be used as a "from" or as a "to"
-struct FromTo {
+/// Can be parsed from --from/to <name>:amount[%]
+#[derive(PartialEq)]
+struct Target {
     member: String,
-    amount: Money,
+    amount: Option<i64>,
 }
 
-impl FromTo {
-    fn parse(input: String, total_money: &Money) -> Self {
+impl Target {
+    fn parse(input: &str, total_money: i64) -> Result<Self, TargetParsingError> {
         let in_split: Vec<_> = input.trim_end_matches("%").split(":").collect();
-        if in_split.len() != 2 {
-            panic!("Error: Please use the following syntax to specify Amounts: --from/--to <name>:<amount>[%]")
+        if in_split[0].is_empty() {
+            return Err(TargetParsingError::InvalidFormat(
+                "Please use the format <name>:[<number>[%]]. (maybe you forgot ':'?".to_string()));
         }
-
-        let amount = if input.ends_with("%") {
-            let percent: f32 = in_split[1].parse()
-                .expect(format!("Please specify a valid number as amount for argument {}", input).as_str());
-            let amount = if let Money::Euro(cur_amount) = total_money {
-                (percent * *cur_amount as f32) as u32 // here is a silent *e-2 * e+2 for dividing the percentage
+        if in_split.len() == 2 {
+            let amount = if input.ends_with("%") {
+                let percent: f32 = in_split[1].trim().replace(",", ".").parse::<f32>()?
+                    / 100.;
+                let amount =
+                    (percent * total_money as f32) as i64;
+                amount
             } else {
-                todo!();
+                let amount: f32 = in_split[1].trim().replace(",", ".").parse::<f32>()?
+                    * 100.;
+                amount.round() as i64
             };
-            amount
+            return Ok(Self {
+                member: in_split[0].to_owned(),
+                amount: Some(amount),
+            });
+        } else if in_split.len() == 1 {
+            Ok(Self {
+                member: in_split[0].to_owned(),
+                amount: None,
+            })
         } else {
-            let amount: f32 = in_split[1].parse::<f32>()
-                .expect(format!("Error: Please specify a valid number as amount for argument {}", input).as_str())
-                * 100.;
-            amount as u32
-        };
-        return Self {
-            member: in_split[0].to_owned(),
-            amount: Money::Euro(amount),
-        };
+            return Err(TargetParsingError::InvalidFormat(
+                "Please use the format <name>:[<number>[%]]. (maybe you forgot ':'?".to_string()));
+        }
+    }
+}
+
+#[cfg(test)]
+mod target_tests {
+    use crate::split_logic::{Target};
+
+    #[test]
+    fn test_target_parse() {
+
+        // valid cases
+        let case_absolute_amount_comma = "peter:25,22";
+        let ft = Target::parse(case_absolute_amount_comma, 100_00);
+        assert!(ft.is_ok());
+        let ft = ft.unwrap();
+        assert_eq!(ft.member, "peter");
+        assert_eq!(ft.amount.unwrap(), 25_22);
+
+        let case_absolute_amount_dot = "peter:25.22";
+        let ft = Target::parse(case_absolute_amount_dot, 100_00);
+        assert!(ft.is_ok());
+        let ft = ft.unwrap();
+        assert_eq!(ft.member, "peter");
+        assert_eq!(ft.amount.unwrap(), 25_22);
+
+
+        let case_percentage = "peter:10%";
+        let ft = Target::parse(case_percentage, 100_00);
+        assert!(ft.is_ok());
+        let ft = ft.unwrap();
+        assert_eq!(ft.member, "peter");
+        assert_eq!(ft.amount.unwrap(), 10_00);
+
+
+        // invalid cases
+        let case_err_nosplit = "peter25,22";
+        let ft = Target::parse(case_err_nosplit, 100_00);
+        assert!(ft.is_err());
+        let case_err_noamount = "peter";
+        let ft = Target::parse(case_err_noamount, 100_00);
+        assert!(ft.is_err());
+        let case_err_noname = "25,22";
+        let ft = Target::parse(case_err_noname, 100_00);
+        assert!(ft.is_err());
+        let case_err_noamount_percentage = "peter:%";
+        let ft = Target::parse(case_err_noamount_percentage, 100_00);
+        assert!(ft.is_err());
+        let case_err_nothing = ":";
+        let ft = Target::parse(case_err_nothing, 100_00);
+        assert!(ft.is_err());
+        let case_err_noname_double = ":25,22";
+        let ft = Target::parse(case_err_noname_double, 100_00);
+        assert!(ft.is_err());
+        let case_err_noamount_double = "peter:";
+        let ft = Target::parse(case_err_noamount_double, 100_00);
+        assert!(ft.is_err());
     }
 }
 
@@ -125,7 +165,6 @@ struct Logic {
     state: SplitterState,
 
     current_group: Option<usize>,
-    currency: String,
 }
 
 impl Logic {
@@ -136,7 +175,6 @@ impl Logic {
         return Self {
             state,
             current_group,
-            currency: "€".to_owned(),
         };
     }
 
@@ -150,14 +188,30 @@ impl Logic {
         println!("Group Statistics for group {}:", group.name);
         println!("Members:");
         for mem in &group.members {
-            println!("{}: {}", mem.id, mem.name);
+            println!("{}: {}", mem.name, mem.balance);
         }
-        println!("\n\nOutstanding Transactions:");
-        for ta in &group.transaction_todos {
-            println!("From {} to {}: {} {}",
-                     group.members[ta.from].name, group.members[ta.to].name,
-                     ta.amount.to_string(), self.currency);
+    }
+
+    /// Helper function to split `cents` Cents among `among` many people as just a possible
+    /// This means splitting as equal as possible, distributing leftover cents from the top equally
+    fn split_equal_among(cents: i64, among: usize) -> Vec<i64> {
+        let mut result = Vec::with_capacity(among);
+        let everyone_split = cents / among as i64;
+
+        let (neg, cents) = if cents < 0 { (true, -cents) } else { (false, cents) };
+
+        let remainder = cents as u64 % among as u64;
+        let mut remainder = if neg { -(remainder as i64) } else { remainder as i64 };
+
+        result.resize_with(result.capacity(), || everyone_split);
+        for i in 0..remainder.abs() as usize {
+            result[i] += remainder.signum();
+            remainder -= remainder.signum();
+            if remainder.abs() == 0 {
+                break;
+            }
         }
+        return result;
     }
 
     /// get a reference to the group or panic
@@ -169,77 +223,127 @@ impl Logic {
         };
         return group;
     }
-
-    fn parse_froms_and_tos(from: Vec<String>, to: Vec<String>, amount: Money)
-                           -> (Vec<FromTo>, Vec<FromTo>) {
-        if from.len() < 1 {
-            panic!("Error: Needs at least one Argument \"--from\"");
-        }
-        let mut froms_parsed = Vec::with_capacity(from.len());
-        let mut given_amount = Money::Euro(0);
-        for giver in from {
-            froms_parsed.push(FromTo::parse(giver, &amount));
-            given_amount.into() += froms_parsed.last().unwrap().amount.0;
-        }
-        if given_amount > amount {
-            panic!("Error: The amounts specified with '--from' sum up to more than the total amount: {} vs {}",
-                   given_amount.0, amount.0);
-        }
-        let mut tos_parsed = Vec::with_capacity(to.len());
-        let mut taken_amount = Money::Euro(0);
-        for recv in to {
-            tos_parsed.push(FromTo::parse(recv, &amount));
-            taken_amount.0 += tos_parsed.last().unwrap().amount.0;
-        }
-        if taken_amount > amount {
-            panic!("Error: The amounts specified with '--to' sum up to more than the total amount: {} vs {}",
-                   taken_amount.0, amount.0);
-        }
-        return (froms_parsed, tos_parsed);
+    fn get_group_mut(self: &mut Self, group_name: Option<String>) -> &mut Group {
+        let group = match group_name {
+            None => (self.state.groups.get_mut(self.current_group.expect("Error: No group was found"))).unwrap(),
+            Some(name) => self.state.groups.iter().find(|&gn| gn.name == name)
+                .expect("Error: Could not find a group with this name")
+        };
+        return group;
     }
-    fn split(self: &Self, amount: Money, group_name: Option<String>,
-             from: Vec<String>, to: Vec<String>, name: String) {
-        let transaction = self.split_into_transaction(amount, group_name, from, to);
-    }
-    fn split_into_transaction(self: &Self, amount: Money, group_name: Option<String>,
-                              from: Vec<String>, to: Vec<String>) -> TransactionChange {
-        let (fr_parsed, to_parsed) = Self::parse_froms_and_tos(from, to, amount);
-        let group = self.get_group(group_name);
-        let mut bins = HashMap::<String, f32>::with_capacity(group.members.len());
 
-        for member in &group.members {
-            bins.insert(member.name.clone(), 0.);
+    /// Parses entries that originate with --from or --to arguments.
+    /// it returns the list of the names together with an option denoting their amounts.
+    /// None means they did not specify an amount.
+    /// The second return value is the total amount that was explicitly given
+    /// The third return value is the number of wildcard givers
+    fn parse_targets(raw_targets: Vec<String>, total_amount: i64) -> Result<(Vec<Target>, i64, usize), TargetParsingError> {
+        let mut targets_parsed = Vec::with_capacity(raw_targets.len());
+        let mut summed = 0i64;
+        let mut wildcard_givers = 0usize;
+        for giver in &raw_targets {
+            targets_parsed.push(Target::parse(giver.as_str(), total_amount)?);
+            let t_amount = targets_parsed.last().unwrap().amount.clone();
+            summed += t_amount.unwrap_or(0);
+            wildcard_givers += if t_amount.is_none() { 1 } else { 0 };
         }
-        let mut to_sum = 0;
-        for to in to_parsed {
-            bins.get_mut(to.member.as_str())
-                .expect(format!("Error: No member '{}' could be found in group '{}'", to.member, group.name).as_str())
-                -= to.amount;
-            to_sum += to.amount;
+        if summed.abs() > total_amount {
+            return Err(TargetParsingError::InvalidSemantic(
+                format!("Error: The amounts specified with '--from' or '--to' sum up to more than the total amount: {} vs {}",
+                        summed, total_amount)
+            ));
         }
-        // then positively add all the froms
-        for from in &fr_parsed {
-            bins.get_mut(from.member.as_str())
-                .expect(format!("Error: No member '{}' could be found in group '{}'", to.member, group.name).as_str())
-                += from.amount;
+        Ok((targets_parsed, summed, wildcard_givers))
+    }
+
+    /// split endpoint calling the calculation function, logging the result and applying the result to
+    /// the current member's balances
+    fn split(self: &mut Self, amount: i64, group_name: Option<String>,
+             from: Vec<String>, to: Vec<String>, name: String, balance_rest: bool) {
+        let group = self.get_group_mut(group_name);
+        let transaction =
+            self.split_into_transaction(amount, group, from.clone(), to.clone(), balance_rest)
+                .unwrap_or_else(|error| panic!("Transaction Split was not Successful:\n{:?}", error));
+        // log the transaction about to take place
+        group.log.push(LogEntry::new(
+            LoggedCommand::Split {
+                amount: (amount * 100.),
+                from,
+                to,
+                name,
+                group: group.name.clone(),
+                balance_rest,
+            },
+            transaction.clone(),
+        ));
+        // set values according to the transaction bin
+        for member in &mut group.members {
+            member.balance += transaction.get(member.name.as_str()).unwrap();
         }
-        let rest_amount = amount - to_sum;
-        let rest_amount_pp = rest_amount / (group.members.len() - to_parsed.len());
-        for member in &group.members {
-            if !to_parsed.iter().find(|&el| el.member == member).is_some() {
-                bins.get_mut(member.name.as_str())
-                    .expect(format!("Error: No member '{}' could be found in group '{}'", to.member, group.name).as_str())
-                    -= rest_amount_pp;
+    }
+
+    /// receives vectors of --from and --to arguments, a amount to be split, a group name this
+    /// should be assigned to and a flag indicating whether members named in a --to directive
+    /// should share the rest of the bill with them
+    fn split_into_transaction(self: &Self, total_amount: i64, group: &Group,
+                              from: Vec<String>, to: Vec<String>, balance_rest: bool) -> Result<TransactionChange, InternalSplitterError> {
+        let mut givers = Self::parse_targets(from, total_amount)?;
+        let recvrs = Self::parse_targets(to, total_amount)?;
+        if recvrs.0.iter().find(|&el| el.amount.is_none()).is_some() {
+            return Err(InternalSplitterError::TargetParsingError(format!("Amounts for --to must be specified explicitly")));
+        }
+        // normalize givers to contain entries for all members of the group
+        let moneysplit =
+            Self::split_equal_among(total_amount - givers.1, givers.2);
+        let mut wcg_index = 0;
+        let mut transaction_map = HashMap::with_capacity(group.members.len());
+
+        // positively add all the froms
+        for mem in &group.members {
+            if let Some(giver) = givers.0.iter().find(|&target| target.member == mem.name)
+            {
+                if let Some(amount) = giver.amount {
+                    transaction_map.insert(mem.name.clone(), amount);
+                } else {
+                    transaction_map.insert(mem.name.clone(), moneysplit[wcg_index]);
+                    wcg_index += 1;
+                }
+            } else {
+                transaction_map.insert(mem.name.clone(), 0);
             }
         }
-        // handle entries that are a fraction of a cent
-        bins.drain().map(|(k, v)| (k, Money::Euro(v as u32))).collect()
+
+        // subtract all tos from the balance of the transaction
+        // peter started with 0, but takes 5€ of the pot, reaching a balance of -5€
+        // if balance_rest is true, everything gets split onto the --to takers as well, if not, they
+        // are excluded from the calculation and pay exactly as much as specified
+        let moneysplit = Self::split_equal_among(
+            total_amount - recvrs.1,
+            group.members.len() - if balance_rest { 0 } else { recvrs.0.len() },
+        );
+        let mut ms_idx = 0;
+        for mem in &group.members {
+            if let Some(recv) = recvrs.0.iter().find(|&el| el.member == mem.name) {
+                let mut x = transaction_map.get_mut(&mem.name).unwrap();
+                *x -= recv.amount.unwrap();
+                if balance_rest {
+                    *x -= moneysplit[ms_idx];
+                    ms_idx += 1;
+                }
+            } else {
+                let mut x = transaction_map.get_mut(&mem.name).unwrap();
+                *x -= moneysplit[ms_idx];
+                ms_idx += 1;
+            }
+        }
+        // if balance rest is not specified, balance between the non-specified group members
+        return Ok(transaction_map);
     }
 
-    fn run(self: &Self, command: SubCommand) -> Result<(), &str> {
+    fn run(self: &Self, command: SubCommand) {
         match command {
-            SubCommand::Create { name, members } => todo!(),
-            SubCommand::Undo => { todo!() }
+            SubCommand::Create { name, members } => self.create_group(name, members),
+            SubCommand::Undo(index) => { todo!() }
             SubCommand::DeleteGroup { group } => todo!(),
             SubCommand::DeleteEntry { group, entry_number } => todo!(),
             SubCommand::List { group } => todo!(),
@@ -247,46 +351,95 @@ impl Logic {
             SubCommand::Pay { amount, group, from, to } => todo!(),
             SubCommand::Split {
                 amount, group, from, to, name, balance_rest
-            } => { todo!(); }
+            } => self.split((amount * 100.) as i64, group, from, to, name,
+                            balance_rest.unwrap_or(false)),
             SubCommand::Balance { group } => todo!(),
-        }
-        Ok(())
+        };
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::split_logic::{Group, Logic, Member, Money, SplitterState};
+mod logic_tests {
+    use crate::split_logic::{Group, Logic, Member, SplitterState, Target};
 
     #[test]
-    fn test_simple_split_one_from() {
-        let group = Group {
-            name: "testgroup".to_owned(),
-            members: vec![
-                Member {
-                    id: 0,
-                    name: "Alice".to_owned(),
-                }, Member {
-                    id: 0,
-                    name: "Bob".to_owned(),
-                }, Member {
-                    id: 0,
-                    name: "Charly".to_owned(),
-                },
-            ],
-            transaction_todos: vec![],
-            log: vec![],
-        };
+    fn test_split_equal_among() {
+        // test positive values
+        // test "perfect" split
+        let result = Logic::split_equal_among(100, 10);
+        for x in result {
+            assert_eq!(x, 10);
+        }
+        // test "imperfect" split
+        let result = Logic::split_equal_among(100, 9);
+        let expected_vec = vec![12, 11, 11, 11, 11, 11, 11, 11, 11];
+        for i in 0..expected_vec.len() {
+            assert_eq!(result[i], expected_vec[i]);
+        }
+        // test negative values
+        // test "perfect" split
+        let result = Logic::split_equal_among(-100, 10);
+        for x in result {
+            assert_eq!(x, -10);
+        }
+        // test "imperfect" split
+        let result = Logic::split_equal_among(-100, 9);
+        let expected_vec = vec![-12, -11, -11, -11, -11, -11, -11, -11, -11];
+        for i in 0..expected_vec.len() {
+            assert_eq!(result[i], expected_vec[i]);
+        }
+    }
+
+    #[test]
+    fn test_parse_targets() {
+        let from_entries = vec!["alice:12".to_string(), "bob:13".to_string(), "charly:10%".to_string()];
+
+        let parsed = Logic::parse_targets(from_entries, 100_00);
+        assert!(parsed.is_ok());
+        let parsed = parsed.unwrap();
+        assert_eq!(parsed.0.len(), 3);
+        assert!(parsed.0.contains(&Target { member: "alice".to_string(), amount: Some(12_00) }), "Alice missing");
+        assert!(parsed.0.contains(&Target { member: "bob".to_string(), amount: Some(13_00) }), "Bob missing");
+        assert!(parsed.0.contains(&Target { member: "charly".to_string(), amount: Some(10_00) }), "Charly missing");
+        assert_eq!(parsed.1, 35_00, "Summed amount is not correct");
+        assert_eq!(parsed.2, 0, "No Members had unspecified amounts");
+
+        // two wildcard givers
+        let from_entries = vec!["alice:12".to_string(), "bob".to_string(), "charly".to_string()];
+
+        let parsed = Logic::parse_targets(from_entries, 100_00);
+        assert!(parsed.is_ok());
+        let parsed = parsed.unwrap();
+        assert_eq!(parsed.0.len(), 3);
+        assert!(parsed.0.contains(&Target { member: "alice".to_string(), amount: Some(12_00) }), "Alice missing");
+        assert!(parsed.0.contains(&Target { member: "bob".to_string(), amount: None }), "Bob missing");
+        assert!(parsed.0.contains(&Target { member: "charly".to_string(), amount: None }), "Charly missing");
+        assert_eq!(parsed.1, 12_00, "Summed amount is not correct");
+        assert_eq!(parsed.2, 2, "No Members had unspecified amounts");
+
+        // froms > 100%
+        let from_entries = vec!["alice:90".to_string(), "bob:20".to_string(), "charly:10%".to_string()];
+
+        let parsed = Logic::parse_targets(from_entries, 100_00);
+        assert!(parsed.is_err(), "Expected error showing incorrect amounts");
+    }
+
+    #[test]
+    fn test_simple_split_one_giver() {
+        let group =
+            Group::new("testgroup".to_owned(),
+                       vec!["Alice".to_string(), "Bob".to_string(), "Charly".to_string()]);
         let splitter = Logic {
             state: SplitterState {
                 groups: vec![group]
             },
             current_group: Some(0),
-            currency: "EUR".to_string(),
         };
         let transaction_bins = splitter.split_into_transaction(
-            Money::Euro(120), Some("testgroup".to_string()), vec!["Alice".to_string()], vec![]);
+            120, &group, vec!["Alice".to_string()], vec![], false);
         // alle - 120/3 = -40, Alice +120 | A80, B-40,c-40
+        assert!(transaction_bins.is_ok());
+        let transaction_bins = transaction_bins.unwrap();
         assert_eq!(transaction_bins.len(), 3);
         assert!(transaction_bins.contains_key("Alice"));
         assert!(transaction_bins.contains_key("Bob"));
@@ -294,5 +447,138 @@ mod tests {
         assert_eq!(transaction_bins["Alice"], 80);
         assert_eq!(transaction_bins["Bob"], -40);
         assert_eq!(transaction_bins["Charly"], -40);
+    }
+
+    #[test]
+    fn test_multiple_givers() {
+        let group =
+            Group::new("testgroup".to_owned(),
+                       vec!["Alice".to_string(), "Bob".to_string(),
+                            "Charly".to_string(), "Django".to_string()]);
+        let splitter = Logic {
+            state: SplitterState {
+                groups: vec![group]
+            },
+            current_group: Some(0),
+        };
+        let transaction_bins = splitter.split_into_transaction(
+            120, &group,
+            vec!["Alice".to_string(), "Bob".to_string()], vec![], false);
+        // alle - 120/4 = -30, Alice +60, Bob +60 | A30, B30, C-30, D-30
+        assert!(transaction_bins.is_ok());
+        let transaction_bins = transaction_bins.unwrap();
+        assert_eq!(transaction_bins.len(), 4);
+        assert!(transaction_bins.contains_key("Alice"));
+        assert!(transaction_bins.contains_key("Bob"));
+        assert!(transaction_bins.contains_key("Charly"));
+        assert!(transaction_bins.contains_key("Django"));
+        assert_eq!(transaction_bins["Alice"], 30);
+        assert_eq!(transaction_bins["Bob"], 30);
+        assert_eq!(transaction_bins["Charly"], -30);
+        assert_eq!(transaction_bins["Django"], -30);
+    }
+
+    #[test]
+    fn test_one_to() {
+        let group =
+            Group::new("testgroup".to_owned(),
+                       vec!["Alice".to_string(), "Bob".to_string(),
+                            "Charly".to_string(), "Django".to_string()]);
+        let splitter = Logic {
+            state: SplitterState {
+                groups: vec![group]
+            },
+            current_group: Some(0),
+        };
+        let transaction_bins = splitter.split_into_transaction(
+            130, &group,
+            vec!["Bob".to_string()],
+            vec!["Alice:0,1".to_string()], false);
+        // alice - 10 -> A-10
+        // total-10 = 120
+        // BCD - 120/3 = -40
+        // Bob + 130
+        // A-10, B-40+130=90, C-40, D-40
+        assert!(transaction_bins.is_ok());
+        let transaction_bins = transaction_bins.unwrap();
+        assert_eq!(transaction_bins.len(), 4);
+        assert!(transaction_bins.contains_key("Alice"));
+        assert!(transaction_bins.contains_key("Bob"));
+        assert!(transaction_bins.contains_key("Charly"));
+        assert!(transaction_bins.contains_key("Django"));
+        assert_eq!(transaction_bins["Alice"], -10);
+        assert_eq!(transaction_bins["Bob"], 90);
+        assert_eq!(transaction_bins["Charly"], -40);
+        assert_eq!(transaction_bins["Django"], -40);
+    }
+
+    #[test]
+    fn test_multiple_to() {
+        let group =
+            Group::new("testgroup".to_owned(),
+                       vec!["Alice".to_string(), "Bob".to_string(),
+                            "Charly".to_string(), "Django".to_string()]);
+        let splitter = Logic {
+            state: SplitterState {
+                groups: vec![group]
+            },
+            current_group: Some(0),
+        };
+        let transaction_bins = splitter.split_into_transaction(
+            140, &group,
+            vec!["Bob".to_string()],
+            vec!["Alice:0,1".to_string(), "Charly:0.1".to_string()], false);
+        // alice - 10 -> A-10
+        // charly -10 -> C-10
+        // total-10-10 = 120
+        // BD - 120/2 = -60
+        // Bob + 140
+        // A-10, B-60+140=80, C-10, D-60
+        assert!(transaction_bins.is_ok());
+        let transaction_bins = transaction_bins.unwrap();
+        assert_eq!(transaction_bins.len(), 4);
+        assert!(transaction_bins.contains_key("Alice"));
+        assert!(transaction_bins.contains_key("Bob"));
+        assert!(transaction_bins.contains_key("Charly"));
+        assert!(transaction_bins.contains_key("Django"));
+        assert_eq!(transaction_bins["Alice"], -10);
+        assert_eq!(transaction_bins["Bob"], 80);
+        assert_eq!(transaction_bins["Charly"], -10);
+        assert_eq!(transaction_bins["Django"], -60);
+    }
+
+    #[test]
+    fn test_balance_rest() {
+        let group =
+            Group::new("testgroup".to_owned(),
+                       vec!["Alice".to_string(), "Bob".to_string(),
+                            "Charly".to_string(), "Django".to_string()]);
+        let splitter = Logic {
+            state: SplitterState {
+                groups: vec![group]
+            },
+            current_group: Some(0),
+        };
+        let transaction_bins = splitter.split_into_transaction(
+            140, &group,
+            vec!["Bob".to_string()],
+            vec!["Alice:0,1".to_string(), "Charly:0.1".to_string()], true);
+        // alice - 10 -> A-10
+        // charly -10 -> C-10
+        // total-10-10 = 120
+        // ABCD - 120/4 = -30
+        // Bob + 140
+        // A-10-30=-40, B+140-30=110, C-10-30=-40, D-30
+        assert!(transaction_bins.is_ok());
+        let transaction_bins = transaction_bins.unwrap();
+        assert_eq!(transaction_bins.len(), 4);
+        assert!(transaction_bins.contains_key("Alice"));
+        assert!(transaction_bins.contains_key("Bob"));
+        assert!(transaction_bins.contains_key("Charly"));
+        assert!(transaction_bins.contains_key("Django"));
+        assert_eq!(transaction_bins["Alice"], -40);
+        assert_eq!(transaction_bins["Bob"], 110);
+        assert_eq!(transaction_bins["Charly"], -40);
+        assert_eq!(transaction_bins["Django"], -30);
     }
 }

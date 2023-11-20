@@ -9,4 +9,4 @@ edition = "2021"
 chrono = "0.4.31"
 clap = { version = "4.4.6", features = ["derive"] }
 regex = "1.9.6"
-rusqlite = "0.29.0"
+serde = { version = "1.0.192", features = ["derive"] }

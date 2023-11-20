@@ -19,10 +19,10 @@ If a % is specified at the end of amount, it is interpreted as percentage, if no
 If the sum is more than 100% of the amount payed, the action fails.
 --from fred 200% -> is discarded  
 --from a 10% --from b 20% --from c 80% -> is discarded  
-at least one instance of a from argument must be present  
+at least one instance of a from argument must be present
 
 ```[--to {member name}:number[%]]*``` Repeatable Argument, telling the program who "takes" how much of the "pot".
-("To whom go 3,6")
+("To whom go 3,6?")
 For example, A Pizza restaurant bill costs 22,5€ and is split between fred, george and Jenny.
 Fred pays for himself, george and Jenny split whats left among them.
 This would look like: [...] --to fred 3,6

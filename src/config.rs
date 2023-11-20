@@ -41,7 +41,9 @@ pub(crate) enum SubCommand {
         #[arg(long, short)]
         to: String,
     },
-    Undo,
+    Undo {
+        index: Option<usize>
+    },
     Create {
         name: String,
 
@@ -53,7 +55,7 @@ pub(crate) enum SubCommand {
     },
     DeleteEntry {
         group: String,
-        entry_number: u32,
+        entry_number: usize,
     },
     List {
         group: Option<String>
