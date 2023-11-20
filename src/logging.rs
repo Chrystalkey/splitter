@@ -17,17 +17,13 @@ pub enum LoggedCommand {
         from: String,
         to: String,
     },
-    Undo(LoggedCommand),
+    Undo(Box<LoggedCommand>),
     Create {
         name: String,
         members: Vec<String>,
     },
     DeleteGroup {
         group: String,
-    },
-    DeleteEntry {
-        group: String,
-        entry_number: usize,
     },
     Balance {
         group: String
@@ -50,6 +46,6 @@ impl LogEntry {
 
     /// the change vector "undo" action original vector + reversed = 0
     pub fn reversed_change(&self) -> TransactionChange {
-        self.change.iter().map(|(k, v)| (k, -v)).collect()
+        self.change.iter().map(|(k, &v)| (k.clone(), -v)).collect()
     }
 }

@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign};
 
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 enum Currency {
     EUR,
     USD,
@@ -45,7 +45,7 @@ impl From<&str> for Currency {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 struct Money {
     amount: i64,
     currency: Currency,
@@ -56,6 +56,13 @@ impl Into<i64> for Money {
         self.amount
     }
 }
+
+impl Into<f32> for Money {
+    fn into(self) -> f32 {
+        return self.amount as f32;
+    }
+}
+
 
 impl Display for Money {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -108,11 +115,10 @@ impl SubAssign for Money {
     }
 }
 
-impl Mul for Money {
+impl<T: Sized + Into<i64>> Mul<T> for Money {
     type Output = Self;
-    fn mul(self, rhs: Self) -> Self::Output {
-        assert_eq!(self.currency, rhs.currency, "Currencies must match!");
-        let rs = self.amount * rhs.amount;
+    fn mul(self, rhs: T) -> Self::Output {
+        let rs = self.amount * rhs.into();
         Money {
             amount: rs,
             currency: self.currency,
@@ -120,17 +126,18 @@ impl Mul for Money {
     }
 }
 
-impl MulAssign for Money {
-    fn mul_assign(&mut self, rhs: Self) {
-        self.amount = self.amount * rhs.amount
+impl<T: Sized + Into<i64>> MulAssign<T> for Money
+    where T: Into<i64> {
+    fn mul_assign(&mut self, rhs: T) {
+        self.amount = self.amount * rhs.into()
     }
 }
 
-impl Div for Money {
+impl<T: Sized + Into<i64>> Div<T> for Money
+    where T: Into<i64> {
     type Output = Self;
-    fn div(self, rhs: Self) -> Self::Output {
-        assert_eq!(self.currency, rhs.currency, "Currencies must match!");
-        let rs = self.amount / rhs.amount;
+    fn div(self, rhs: T) -> Self::Output {
+        let rs = self.amount / rhs.into();
         Money {
             amount: rs,
             currency: self.currency,
@@ -138,17 +145,16 @@ impl Div for Money {
     }
 }
 
-impl DivAssign for Money {
-    fn div_assign(&mut self, rhs: Self) {
-        self.amount = self.amount / rhs.amount
+impl<T: Sized + Into<i64>> DivAssign<T> for Money where T: Into<i64> {
+    fn div_assign(&mut self, rhs: T) {
+        self.amount = self.amount / rhs.into()
     }
 }
 
-impl Rem for Money {
+impl<T: Sized + Into<i64>> Rem<T> for Money where T: Into<i64> {
     type Output = Self;
-    fn rem(self, rhs: Self) -> Self::Output {
-        assert_eq!(self.currency, rhs.currency, "Currencies must match!");
-        let rs = self.amount % rhs.amount;
+    fn rem(self, rhs: T) -> Self::Output {
+        let rs = self.amount % rhs.into();
         Money {
             amount: rs,
             currency: self.currency,
@@ -156,11 +162,12 @@ impl Rem for Money {
     }
 }
 
-impl RemAssign for Money {
-    fn rem_assign(&mut self, rhs: Self) {
-        self.amount = self.amount % rhs.amount
+impl<T: Sized + Into<i64>> RemAssign<T> for Money where T: Into<i64> {
+    fn rem_assign(&mut self, rhs: T) {
+        self.amount = self.amount % rhs.into()
     }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -172,5 +179,17 @@ mod tests {
         assert_eq!(format!("{}", m), "100.00€");
         let m = Money::new(10, "EUR");
         assert_eq!(format!("{}", m), "0.10€");
+    }
+
+    #[test]
+    fn test_math() {
+        let m1 = Money::new(100_00, "EUR");
+        let m2 = Money::new(13_00, "EUR");
+
+        assert_eq!(m1 + m2, Money::new(113_00, "EUR"));
+        assert_eq!(m1 - m2, Money::new(87_00, "EUR"));
+        assert_eq!(m1 * 20, Money::new(2000_00, "EUR"));
+        assert_eq!(m1 / 10, Money::new(10_00, "EUR"));
+        assert_eq!(m1 % 13, Money::new(3, "EUR"));
     }
 }

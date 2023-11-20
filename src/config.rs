@@ -1,13 +1,19 @@
-use clap::{Parser, Subcommand};
+use clap::{command, Parser, Subcommand};
 
 
 #[derive(Parser, Debug)]
 pub(crate) struct Cli {
     #[command(subcommand)]
-    command: Option<SubCommand>,
+    pub(crate) command: Option<SubCommand>,
 
     #[arg(long, short)]
-    database: Option<String>,
+    pub(crate) database: Option<String>,
+}
+
+impl Cli {
+    pub(crate) fn is_empty(&self) -> bool {
+        return self.command.is_none() && self.database.is_none();
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -42,7 +48,8 @@ pub(crate) enum SubCommand {
         to: String,
     },
     Undo {
-        index: Option<usize>
+        group: Option<String>,
+        index: Option<usize>,
     },
     Create {
         name: String,
@@ -53,12 +60,10 @@ pub(crate) enum SubCommand {
     DeleteGroup {
         group: String
     },
-    DeleteEntry {
-        group: String,
-        entry_number: usize,
-    },
     List {
-        group: Option<String>
+        group: Option<String>,
+        #[arg(short = 'a', long = "all")]
+        all: Option<bool>,
     },
     Stat {
         group: Option<String>

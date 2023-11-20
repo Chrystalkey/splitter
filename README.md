@@ -58,7 +58,9 @@ Used like:
 
 ### Undo
 
-splitter undo -> undo the last splitting action
+splitter undo [{group name}] [{index}] -> undo the last splitting action that was not an undo
+if group name is not specified, the currently selected group is used
+if index is not specified, the last splitting action that was not an undo from the group specified is undone
 
 ### Create
 
@@ -68,7 +70,7 @@ Deletes the group specified as third argument
 
 ### List
 
-splitter list [{group name}] -> lists the group name or if none is specified all groups and their expenses  
+splitter list [{group name}] [--all]-> lists the group name or if `--all` is specified all groups and their expenses  
 Lists a few(all) transactions from a group numbered in a way that is deletable
 
 ### Stat
@@ -76,10 +78,6 @@ Lists a few(all) transactions from a group numbered in a way that is deletable
 splitter stat [[--group] {group name}] -> shows the stats of a given group or if none is specified all groups
 
 print out statistics of the group (who owes whom how much)
-
-### Delete Entry
-
-splitter delete-entry [[--group] {group name}] {entry number}
 
 ### Delete Group
 
