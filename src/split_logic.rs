@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::{io, time};
 use std::path::PathBuf;
 use std::string::ToString;
 use serde::{Deserialize, Serialize};
@@ -200,7 +201,7 @@ impl Logic {
         println!("Group Statistics for group {}:", group.name);
         println!("Members:");
         for mem in &group.members {
-            println!("{}: {}", mem.name, mem.balance);
+            println!("{}: {:.02}€", mem.name, mem.balance as f32 / 100.);
         }
     }
 
@@ -370,10 +371,10 @@ impl Logic {
         for m in &mut group.members {
             if m.name == from {
                 found_both += 1;
-                m.balance -= amount;
+                m.balance += amount;
             } else if m.name == to {
                 found_both += 1;
-                m.balance += amount;
+                m.balance -= amount;
             }
             if found_both == 2 {
                 break;
@@ -387,11 +388,38 @@ impl Logic {
                           transaction)
         );
     }
+    fn delete_group(self: &mut Self, group_name: String, yes: bool) {
+        println!("This will delete the group '{}' forever with no more undo options available.\n",
+                 group_name);
+        self.stat(Some(group_name.clone()));
+        let really = if !yes {
+            println!("Confirm deletion? [yY]|[nN]");
+            let stdin = io::stdin();
+            let mut buffer = String::new();
+            stdin.read_line(&mut buffer).expect("Error: Could not read from Stdin");
+            buffer.starts_with(['y', 'Y', 'j', 'J'])
+        } else {
+            yes
+        };
+        if really && !yes {
+            println!("Confirmed. Deleting group");
+            std::thread::sleep(time::Duration::from_secs(2));
+            self.state.groups = self.state.groups.drain(..)
+                .filter(|grp| grp.name != group_name).collect();
+            self.current_group = Some(0);
+        } else if yes {
+            self.state.groups = self.state.groups.drain(..)
+                .filter(|grp| grp.name != group_name).collect();
+            self.current_group = Some(0);
+        } else if !yes {
+            println!("Operation Cancelled");
+        }
+    }
     pub(crate) fn run(self: &mut Self, command: SubCommand) {
         match command {
             SubCommand::Create { name, members } => self.create_group(name, members),
             SubCommand::Undo { group, index } => { todo!() }
-            SubCommand::DeleteGroup { group } => todo!(),
+            SubCommand::DeleteGroup { group, yes } => self.delete_group(group, yes.unwrap_or(false)),
             SubCommand::List { group, all } => todo!(),
             SubCommand::Stat { group } => self.stat(group),
             SubCommand::Pay { amount, group, from, to } =>
@@ -414,6 +442,40 @@ impl Logic {
 #[cfg(test)]
 mod logic_tests {
     use super::*;
+
+    #[test]
+    fn test_delete_group_success() {
+        let group =
+            Group::new("testgroup".to_owned(),
+                       vec!["Alice".to_string(), "Bob".to_string(), "Charly".to_string()]);
+        let mut splitter = Logic {
+            state: SplitterState {
+                groups: vec![group]
+            },
+            db_path: "".into(),
+            current_group: Some(0),
+        };
+        assert_eq!(splitter.state.groups.len(), 1);
+        splitter.delete_group("testgroup".to_string(), true);
+        assert_eq!(splitter.state.groups.len(), 0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_delete_group_failure() {
+        let group =
+            Group::new("testgroup".to_owned(),
+                       vec!["Alice".to_string(), "Bob".to_string(), "Charly".to_string()]);
+        let mut splitter = Logic {
+            state: SplitterState {
+                groups: vec![group]
+            },
+            db_path: "".into(),
+            current_group: Some(0),
+        };
+        assert_eq!(splitter.state.groups.len(), 1);
+        splitter.delete_group("txt".to_string(), true);
+    }
 
     #[test]
     fn test_split_equal_among() {

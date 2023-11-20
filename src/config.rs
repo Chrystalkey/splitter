@@ -58,7 +58,9 @@ pub(crate) enum SubCommand {
         members: Vec<String>,
     },
     DeleteGroup {
-        group: String
+        group: String,
+        #[arg(short = 'y', long = "yes")]
+        yes: Option<bool>,
     },
     List {
         group: Option<String>,
