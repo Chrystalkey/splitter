@@ -12,7 +12,7 @@ pub(crate) struct Cli {
 
 impl Cli {
     pub(crate) fn is_empty(&self) -> bool {
-        return self.command.is_none() && self.database.is_none();
+        self.command.is_none() && self.database.is_none()
     }
 }
 
@@ -68,7 +68,8 @@ pub(crate) enum SubCommand {
         all: Option<bool>,
     },
     Stat {
-        group: Option<String>
+        group: Option<String>,
+        all: Option<bool>,
     },
     Balance {
         group: String

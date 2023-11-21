@@ -3,7 +3,7 @@ use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Rem, RemAssign, S
 
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
-enum Currency {
+pub enum Currency {
     EUR,
     USD,
     JPY,
@@ -46,9 +46,18 @@ impl From<&str> for Currency {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
-struct Money {
-    amount: i64,
-    currency: Currency,
+pub struct Money {
+    pub amount: i64,
+    pub currency: Currency,
+}
+
+impl Default for Money {
+    fn default() -> Self {
+        Money {
+            amount: 0,
+            currency: Currency::EUR,
+        }
+    }
 }
 
 impl Into<i64> for Money {
@@ -59,7 +68,7 @@ impl Into<i64> for Money {
 
 impl Into<f32> for Money {
     fn into(self) -> f32 {
-        return self.amount as f32;
+        self.amount as f32
     }
 }
 

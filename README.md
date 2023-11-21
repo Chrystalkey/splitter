@@ -70,21 +70,24 @@ Deletes the group specified as third argument
 
 ### List
 
-`splitter list [{group name}] [--all]` -> lists the group name or if `--all` is specified all groups and their expenses  
+`splitter list [{group name}] [--all]` -> lists the group name or if `--all` is specified all groups and their
+expenses  
 Lists a few(all) transactions from a group numbered in a way that is deletable
 
 ### Stat
 
-`splitter stat [[--group] {group name}]` -> shows the stats of a given group or if none is specified all groups
+`splitter stat [[--group] {group name}] [--all]` -> shows the stats of a given group or if none is specified all groups
 
 print out statistics of the group (who owes whom how much)
 
 ### Delete Group
+
 `splitter delete-group {group name} [--group {group name}]`
 
 ### Balance
 
-`splitter balance [[--group] {group name}]` -> shows what has to be paid to whom and sets expenses such that everything is
+`splitter balance [[--group] {group name}]` -> shows what has to be paid to whom and sets expenses such that everything
+is
 payed up afterwards
 
 ## Project State

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::{io, time};
 use std::path::PathBuf;
 use std::string::ToString;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use crate::config::SubCommand;
 use crate::error::InternalSplitterError;
@@ -17,10 +18,10 @@ struct Member {
 
 impl Member {
     fn new(name: String) -> Self {
-        return Member {
+        Member {
             name,
             balance: 0,
-        };
+        }
     }
 }
 
@@ -75,7 +76,7 @@ impl SplitterState {
 }
 
 /// helper struct containing money and a name. Can be used as a "from" or as a "to"
-/// Can be parsed from --from/to <name>:amount[%]
+/// Can be parsed from --from/to {name}[:amount[%]]
 #[derive(PartialEq)]
 struct Target {
     member: String,
@@ -83,36 +84,38 @@ struct Target {
 }
 
 impl Target {
+    /// Parses a target directive specified via `--from` or `--to` into a Target Struct
     fn parse(input: &str, total_money: i64) -> Result<Self, InternalSplitterError> {
-        let in_split: Vec<_> = input.trim_end_matches("%").split(":").collect();
+        let in_split: Vec<_> = input.trim_end_matches('%').split(':').collect();
         if in_split[0].is_empty() {
             return Err(InternalSplitterError::InvalidFormat(
                 "Please use the format <name>:[<number>[%]]. (maybe you forgot ':'?".to_string()));
         }
         if in_split.len() == 2 {
-            let amount = if input.ends_with("%") {
-                let percent: f32 = in_split[1].trim().replace(",", ".").parse::<f32>()?
+            let amount = if input.ends_with('%') {
+                let percent: f32 = in_split[1].trim().replace(',', ".").parse::<f32>()?
                     / 100.;
-                let amount =
-                    (percent * total_money as f32) as i64;
-                amount
+                (percent * total_money as f32) as i64
             } else {
-                let amount: f32 = in_split[1].trim().replace(",", ".").parse::<f32>()?
+                let amount: f32 = in_split[1].trim().replace(',', ".").parse::<f32>()?
                     * 100.;
                 amount.round() as i64
             };
-            return Ok(Self {
+            Ok(Self {
                 member: in_split[0].to_owned(),
                 amount: Some(amount),
-            });
+            })
         } else if in_split.len() == 1 {
+            if !Regex::new(Logic::NAME_REGEX).unwrap().is_match(in_split[0]) {
+                return Err(InternalSplitterError::InvalidName(format!("Name {} is not valid.", in_split[0])));
+            }
             Ok(Self {
                 member: in_split[0].to_owned(),
                 amount: None,
             })
         } else {
-            return Err(InternalSplitterError::InvalidFormat(
-                "Please use the format <name>:[<number>[%]]. (maybe you forgot ':'?".to_string()));
+            Err(InternalSplitterError::InvalidFormat(
+                "Please use the format <name>:[<number>[%]]. (maybe you forgot ':'?".to_string()))
         }
     }
 }
@@ -154,7 +157,7 @@ mod target_tests {
         assert!(ft.is_err());
         let case_err_noamount = "peter";
         let ft = Target::parse(case_err_noamount, 100_00);
-        assert!(ft.is_err());
+        assert!(ft.is_ok());
         let case_err_noname = "25,22";
         let ft = Target::parse(case_err_noname, 100_00);
         assert!(ft.is_err());
@@ -181,27 +184,54 @@ pub struct Logic {
 }
 
 impl Logic {
-    const NAME_REGEX: &'static str = r"[a-zA-Z0-9][a-zA-Z0-9_\-()]*";
+    const NAME_REGEX: &'static str = r"^[a-zA-Z0-9][a-zA-Z0-9_\-()]+$";
     pub fn new(source: PathBuf) -> Self {
         let state = SplitterState::new(source.clone());
         let current_group = if state.groups.is_empty() { None } else { Some(0) };
-        return Self {
+        Self {
             state,
             db_path: source,
             current_group,
-        };
+        }
     }
 
-    fn create_group(self: &mut Self, name: String, members: Vec<String>) {
+    fn create_group(&mut self, name: String, members: Vec<String>) {
+        assert!(Regex::new(Self::NAME_REGEX).unwrap().is_match(name.as_str()),
+                "Please only use alphanumeric names and _-(), starting with one of the former");
         self.state.groups.push(Group::new(name, members));
     }
 
-    fn stat(self: &Self, group_name: Option<String>) {
-        let group = self.get_group(group_name);
-        println!("Group Statistics for group {}:", group.name);
-        println!("Members:");
+    fn stat_group(group: &Group) -> String {
+        let mut string =
+            format!("Group Statistics for group {}:\n\
+        Members:\n\
+        ", group.name);
         for mem in &group.members {
-            println!("{}: {:.02}€", mem.name, mem.balance as f32 / 100.);
+            string = format!("{}\n{}: {:.02}€", string, mem.name, mem.balance as f32 / 100.);
+        }
+        string
+    }
+    fn stat(&self, group_name: Option<String>, all: bool) {
+        if all {
+            for g in &self.state.groups {
+                println!("\n{}\n", Self::stat_group(g));
+            }
+        } else {
+            let group = self.get_group(group_name);
+            println!("\n{}\n", Self::stat_group(group));
+        }
+    }
+    fn list_group(group: &Group) -> String {
+        todo!()
+    }
+    fn list(&self, group_name: Option<String>, all: bool) {
+        if all {
+            for g in &self.state.groups {
+                println!("\n{}\n", Self::list_group(g));
+            }
+        } else {
+            let group = self.get_group(group_name);
+            println!("\n{}\n", Self::list_group(group));
         }
     }
 
@@ -217,34 +247,34 @@ impl Logic {
         let mut remainder = if neg { -(remainder as i64) } else { remainder as i64 };
 
         result.resize_with(result.capacity(), || everyone_split);
-        for i in 0..remainder.abs() as usize {
-            result[i] += remainder.signum();
+        for res in result.iter_mut() {
+            *res += remainder.signum();
             remainder -= remainder.signum();
             if remainder.abs() == 0 {
                 break;
             }
         }
-        return result;
+        result
     }
 
     /// get a reference to the group or panic
-    fn get_group(self: &Self, group_name: Option<String>) -> &Group {
+    fn get_group(&self, group_name: Option<String>) -> &Group {
         let group = match group_name {
             None => (self.state.groups.get(self.current_group.unwrap_or(0)))
                 .expect("Error: No group was found"),
             Some(name) => self.state.groups.iter().find(|&gn| gn.name == name)
                 .expect("Error: Could not find a group with this name")
         };
-        return group;
+        group
     }
-    fn get_group_mut(self: &mut Self, group_name: Option<String>) -> &mut Group {
+    fn get_group_mut(&mut self, group_name: Option<String>) -> &mut Group {
         let group = match group_name {
             None => (self.state.groups.get_mut(self.current_group.unwrap_or(0)))
                 .expect("Error: No group was found"),
             Some(name) => self.state.groups.iter_mut().find(|gn| gn.name == name)
                 .expect("Error: Could not find a group with this name")
         };
-        return group;
+        group
     }
 
     /// Parses entries that originate with --from or --to arguments.
@@ -258,7 +288,7 @@ impl Logic {
         let mut wildcard_givers = 0usize;
         for giver in &raw_targets {
             targets_parsed.push(Target::parse(giver.as_str(), total_amount)?);
-            let t_amount = targets_parsed.last().unwrap().amount.clone();
+            let t_amount = targets_parsed.last().unwrap().amount;
             summed += t_amount.unwrap_or(0);
             wildcard_givers += if t_amount.is_none() { 1 } else { 0 };
         }
@@ -273,13 +303,13 @@ impl Logic {
 
     /// split endpoint calling the calculation function, logging the result and applying the result to
     /// the current member's balances
-    fn split(self: &mut Self, amount: i64, group_name: Option<String>,
+    fn split(&mut self, amount: i64, group_name: Option<String>,
              from: Vec<String>, to: Vec<String>, name: String, balance_rest: bool)
     {
         let group = self.get_group(group_name.clone());
 
         let transaction =
-            self.split_into_transaction(amount, &group, from.clone(), to.clone(), balance_rest)
+            self.split_into_transaction(amount, group, from.clone(), to.clone(), balance_rest)
                 .unwrap_or_else(|error| panic!("Transaction Split was not Successful:\n{:?}", error));
         // log the transaction about to take place
         let group = self.get_group_mut(group_name);
@@ -303,13 +333,13 @@ impl Logic {
     /// receives vectors of --from and --to arguments, a amount to be split, a group name this
     /// should be assigned to and a flag indicating whether members named in a --to directive
     /// should share the rest of the bill with them
-    fn split_into_transaction(self: &Self, total_amount: i64, group: &Group,
+    fn split_into_transaction(&self, total_amount: i64, group: &Group,
                               from: Vec<String>, to: Vec<String>, balance_rest: bool)
                               -> Result<TransactionChange, InternalSplitterError> {
         let givers = Self::parse_targets(from, total_amount)?;
         let recvrs = Self::parse_targets(to, total_amount)?;
-        if recvrs.0.iter().find(|&el| el.amount.is_none()).is_some() {
-            return Err(InternalSplitterError::InvalidFormat(format!("Amounts for --to must be specified explicitly")));
+        if recvrs.0.iter().any(|el| el.amount.is_none()) {
+            return Err(InternalSplitterError::InvalidFormat("Amounts for --to must be specified explicitly".to_string()));
         }
         // normalize givers to contain entries for all members of the group
         let moneysplit =
@@ -356,10 +386,10 @@ impl Logic {
             }
         }
         // if balance rest is not specified, balance between the non-specified group members
-        return Ok(transaction_map);
+        Ok(transaction_map)
     }
 
-    fn pay(self: &mut Self, amount: i64, group: Option<String>, from: String, to: String) {
+    fn pay(&mut self, amount: i64, group: Option<String>, from: String, to: String) {
         let group = self.get_group_mut(group);
         // calculate transaction
         let mut transaction = HashMap::with_capacity(2);
@@ -384,14 +414,14 @@ impl Logic {
         // log transaction
         let gname = group.name.clone();
         group.log.push(
-            LogEntry::new(LoggedCommand::Pay { amount: amount, group: gname, from, to },
+            LogEntry::new(LoggedCommand::Pay { amount, group: gname, from, to },
                           transaction)
         );
     }
-    fn delete_group(self: &mut Self, group_name: String, yes: bool) {
+    fn delete_group(&mut self, group_name: String, yes: bool) {
         println!("This will delete the group '{}' forever with no more undo options available.\n",
                  group_name);
-        self.stat(Some(group_name.clone()));
+        self.stat(Some(group_name.clone()), false);
         let really = if !yes {
             println!("Confirm deletion? [yY]|[nN]");
             let stdin = io::stdin();
@@ -415,13 +445,13 @@ impl Logic {
             println!("Operation Cancelled");
         }
     }
-    pub(crate) fn run(self: &mut Self, command: SubCommand) {
+    pub(crate) fn run(&mut self, command: SubCommand) {
         match command {
             SubCommand::Create { name, members } => self.create_group(name, members),
             SubCommand::Undo { group, index } => { todo!() }
             SubCommand::DeleteGroup { group, yes } => self.delete_group(group, yes.unwrap_or(false)),
-            SubCommand::List { group, all } => todo!(),
-            SubCommand::Stat { group } => self.stat(group),
+            SubCommand::List { group, all } => self.list(group, all.unwrap_or(false)),
+            SubCommand::Stat { group, all } => self.stat(group, all.unwrap_or(false)),
             SubCommand::Pay { amount, group, from, to } =>
                 self.pay((amount * 100.) as i64, group, from, to),
             SubCommand::Split {
