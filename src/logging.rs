@@ -1,20 +1,19 @@
 use std::fmt::{Display, Formatter};
 use serde::{Deserialize, Serialize};
-use crate::split_logic::TransactionChange;
+use crate::split_logic::{Target, TransactionChange};
 
 #[derive(Serialize, Deserialize)]
 pub enum LoggedCommand {
     Split {
         name: String,
         amount: i64,
-        from: Vec<String>,
-        to: Vec<String>,
+        from: Vec<Target>,
+        to: Vec<Target>,
         group: String,
         balance_rest: bool,
     },
     Pay {
         amount: i64,
-        group: String,
         from: String,
         to: String,
     },
@@ -23,17 +22,44 @@ pub enum LoggedCommand {
         name: String,
         members: Vec<String>,
     },
-    DeleteGroup {
-        group: String,
-    },
-    Balance {
-        group: String
-    },
 }
 
 impl Display for LoggedCommand {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        todo!("Display for LoggedCommand")
+        match self {
+            Self::Pay { from, to, amount } => {
+                write!(f, "pay: {}\t to {}\t: {}€", from, to, *amount as f32 / 100.)
+            }
+            Self::Create { name, members } => {
+                write!(f, "create: group `{}` with members {:#?}", name, members)
+            }
+            Self::Split { name, amount, from, to, group, balance_rest } => {
+                let from = from.iter()
+                    .map(|t|
+                        if t.amount.is_none() {
+                            format!("{}: *", t.member)
+                        } else {
+                            format!("{}: {:.02}€\n", t.member, t.amount.unwrap() as f32 / 100.)
+                        }
+                    )
+                    .fold("".to_string(), |accu, el| format!("{}{}", accu, el));
+                let to = to.iter()
+                    .map(|t|
+                        format!("{}: {:.02}€\n", t.member, t.amount.unwrap() as f32 / 100.)
+                    )
+                    .fold("".to_string(), |accu, el| format!("{}{}", accu, el));
+                if to.is_empty() {
+                    write!(f, "split: in group {} `{} {}€ payed for by\n{}\n{}",
+                           group, name, *amount as f32 / 100., from,
+                           if *balance_rest { ", balancing the rest" } else { "" })
+                } else {
+                    write!(f, "split: in group {} `{} {}€ payed for by\n{}\nto\n{}{}",
+                           group, name, *amount as f32 / 100., from, to,
+                           if *balance_rest { ", balancing the rest" } else { "" })
+                }
+            }
+            Self::Undo(_0) => { todo!("Undo is not implemented right now") }
+        }
     }
 }
 
@@ -59,6 +85,6 @@ impl LogEntry {
 
 impl Display for LogEntry {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        todo!("Display for LogEntry")
+        write!(f, "{}", self.command)
     }
 }

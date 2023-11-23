@@ -1,7 +1,10 @@
 use std::collections::HashMap;
-use std::{io, time};
+use std::io;
+use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::string::ToString;
+use std::thread::sleep;
+use std::time::Duration;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use crate::config::SubCommand;
@@ -10,7 +13,7 @@ use crate::logging::{LogEntry, LoggedCommand};
 
 pub(crate) type TransactionChange = HashMap<String, i64>;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct Member {
     name: String,
     balance: i64,
@@ -25,6 +28,28 @@ impl Member {
     }
 }
 
+#[derive(Debug, PartialEq)]
+struct Transaction {
+    from: String,
+    to: String,
+    amount: i64,
+}
+
+impl Transaction {
+    fn new(from: &String, to: &String, amount: i64) -> Self {
+        Transaction {
+            from: from.clone(),
+            to: to.clone(),
+            amount: amount.abs(),
+        }
+    }
+}
+
+impl Display for Transaction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} \tpays {}:\t{:.02}€", self.from, self.to, self.amount as f32 / 100.)
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 struct Group {
@@ -77,10 +102,10 @@ impl SplitterState {
 
 /// helper struct containing money and a name. Can be used as a "from" or as a "to"
 /// Can be parsed from --from/to {name}[:amount[%]]
-#[derive(PartialEq)]
-struct Target {
-    member: String,
-    amount: Option<i64>,
+#[derive(PartialEq, Serialize, Deserialize)]
+pub(crate) struct Target {
+    pub(crate) member: String,
+    pub(crate) amount: Option<i64>,
 }
 
 impl Target {
@@ -222,7 +247,9 @@ impl Logic {
         }
     }
     fn list_group(group: &Group) -> String {
-        todo!()
+        let accu = format!("Log Listing for Group {}\n", group.name);
+        group.log.iter()
+            .fold(accu, |a, e| format!("{a}{e}\n"))
     }
     fn list(&self, group_name: Option<String>, all: bool) {
         if all {
@@ -308,7 +335,7 @@ impl Logic {
     {
         let group = self.get_group(group_name.clone());
 
-        let transaction =
+        let (transaction, from, to) =
             self.split_into_transaction(amount, group, from.clone(), to.clone(), balance_rest)
                 .unwrap_or_else(|error| panic!("Transaction Split was not Successful:\n{:?}", error));
         // log the transaction about to take place
@@ -335,7 +362,7 @@ impl Logic {
     /// should share the rest of the bill with them
     fn split_into_transaction(&self, total_amount: i64, group: &Group,
                               from: Vec<String>, to: Vec<String>, balance_rest: bool)
-                              -> Result<TransactionChange, InternalSplitterError> {
+                              -> Result<(TransactionChange, Vec<Target>, Vec<Target>), InternalSplitterError> {
         let givers = Self::parse_targets(from, total_amount)?;
         let recvrs = Self::parse_targets(to, total_amount)?;
         if recvrs.0.iter().any(|el| el.amount.is_none()) {
@@ -386,9 +413,100 @@ impl Logic {
             }
         }
         // if balance rest is not specified, balance between the non-specified group members
-        Ok(transaction_map)
+        Ok((transaction_map, givers.0, recvrs.0))
     }
+    fn balance_group(group: &Group) -> Vec<Transaction> {
+        let members = &group.members;
+        let mut creditors: Vec<Member> =
+            members.iter().filter(|&mem| mem.balance > 0).cloned().collect();
+        let mut debtors: Vec<Member> =
+            members.iter().filter(|&mem| mem.balance < 0).cloned().collect();
+        creditors.sort_unstable_by(|el1, el2| el1.balance.partial_cmp(&el2.balance).unwrap());
+        debtors.sort_unstable_by(
+            |el1, el2| el1.balance.abs().partial_cmp(&el2.balance.abs())
+                .unwrap());
+        let mut transactions = vec![];
+        // find matching c and d & match them up
+        for d in debtors.iter_mut() {
+            for c in creditors.iter_mut() {
+                if -d.balance < c.balance {
+                    break; // break the loop
+                }
+                if d.balance == -c.balance {
+                    transactions.push(Transaction::new(&d.name, &c.name, c.balance));
+                    d.balance = 0;
+                    c.balance = 0;
+                }
+            }
+        }
 
+        let mut c_idx = 0;
+        // non-matching loop
+        for d in debtors.iter_mut() {
+            if d.balance == 0 {
+                continue;
+            }
+            while creditors.get(c_idx).unwrap().balance == 0 {
+                c_idx += 1;
+            }
+            let mut c = creditors.get_mut(c_idx).unwrap();
+            if c.balance == -d.balance {
+                transactions.push(Transaction::new(&d.name, &c.name, c.balance));
+                d.balance = 0;
+                c.balance = 0;
+                c_idx += 1;
+                continue;
+            }
+            while c.balance < -d.balance {
+                d.balance += c.balance;
+                transactions.push(Transaction::new(&d.name, &c.name, c.balance));
+                c.balance = 0;
+                c_idx += 1;
+                c = creditors.get_mut(c_idx).unwrap();
+            }
+            if c.balance > -d.balance {
+                c.balance += d.balance;
+                transactions.push(Transaction::new(&d.name, &c.name, d.balance));
+                d.balance = 0;
+            }
+        }
+        transactions
+    }
+    fn confirm() -> bool {
+        print!("Confirm? [yY|nN]: ");
+        let mut buffer = String::new();
+        let stdin = io::stdin();
+        stdin.read_line(&mut buffer).expect("stdin Input Error");
+        if buffer.starts_with(['y', 'Y']) {
+            sleep(Duration::from_secs(2));
+            return true;
+        } else {
+            return false;
+        }
+    }
+    fn balance(&mut self, group: String) {
+        let group = self.get_group_mut(Some(group));
+        let transactions = Self::balance_group(group);
+        println!("The following transactions are recommended:");
+        for t in &transactions {
+            println!("{}", t);
+        }
+        if Self::confirm() {
+            for ta in transactions {
+                // bad, optimize later (todo)
+                let d = group.members.iter_mut().find(|m| m.name == ta.from).unwrap();
+                d.balance += ta.amount;
+                let c = group.members.iter_mut().find(|m| m.name == ta.to).unwrap();
+                c.balance -= ta.amount;
+                group.log.push(LogEntry::new(
+                    LoggedCommand::Pay {
+                        amount: ta.amount,
+                        from: ta.from.clone(),
+                        to: ta.to.clone(),
+                    }, HashMap::from([(ta.from, -ta.amount), (ta.to, ta.amount)])));
+            }
+        }
+    }
     fn pay(&mut self, amount: i64, group: Option<String>, from: String, to: String) {
         let group = self.get_group_mut(group);
         // calculate transaction
@@ -412,9 +530,8 @@ impl Logic {
         }
 
         // log transaction
-        let gname = group.name.clone();
         group.log.push(
-            LogEntry::new(LoggedCommand::Pay { amount, group: gname, from, to },
+            LogEntry::new(LoggedCommand::Pay { amount, from, to },
                           transaction)
         );
     }
@@ -422,18 +539,9 @@ impl Logic {
         println!("This will delete the group '{}' forever with no more undo options available.\n",
                  group_name);
         self.stat(Some(group_name.clone()), false);
-        let really = if !yes {
-            println!("Confirm deletion? [yY]|[nN]");
-            let stdin = io::stdin();
-            let mut buffer = String::new();
-            stdin.read_line(&mut buffer).expect("Error: Could not read from Stdin");
-            buffer.starts_with(['y', 'Y', 'j', 'J'])
-        } else {
-            yes
-        };
+        let really = yes || Self::confirm();
         if really && !yes {
             println!("Confirmed. Deleting group");
-            std::thread::sleep(time::Duration::from_secs(2));
             self.state.groups = self.state.groups.drain(..)
                 .filter(|grp| grp.name != group_name).collect();
             self.current_group = Some(0);
@@ -448,7 +556,10 @@ impl Logic {
     pub(crate) fn run(&mut self, command: SubCommand) {
         match command {
             SubCommand::Create { name, members } => self.create_group(name, members),
-            SubCommand::Undo { group, index } => { todo!() }
+            SubCommand::Undo { group, index } => {
+                let _ = (group, index);
+                todo!("Undo is not implemented")
+            }
             SubCommand::DeleteGroup { group, yes } => self.delete_group(group, yes.unwrap_or(false)),
             SubCommand::List { group, all } => self.list(group, all.unwrap_or(false)),
             SubCommand::Stat { group, all } => self.stat(group, all.unwrap_or(false)),
@@ -458,7 +569,7 @@ impl Logic {
                 amount, group, from, to, name, balance_rest
             } => self.split((amount * 100.) as i64, group, from, to, name,
                             balance_rest.unwrap_or(false)),
-            SubCommand::Balance { group } => todo!(),
+            SubCommand::Balance { group } => self.balance(group),
         };
     }
 
@@ -472,6 +583,36 @@ impl Logic {
 #[cfg(test)]
 mod logic_tests {
     use super::*;
+
+    #[test]
+    fn test_balance_equal() {
+        let mut group =
+            Group::new("testgroup".to_string(),
+                       vec!["Alice".to_string(), "Bob".to_string()]);
+        group.members[0].balance = -10_00;
+        group.members[1].balance = 10_00;
+        let tas = Logic::balance_group(&group);
+        assert_eq!(tas.len(), 1);
+        assert_eq!(tas[0].from, "Alice");
+        assert_eq!(tas[0].to, "Bob");
+        assert_eq!(tas[0].amount, 10_00);
+    }
+
+    #[test]
+    fn test_balance_unequal() {
+        let mut group =
+            Group::new("testgroup".to_owned(),
+                       vec!["Alice".to_string(), "Bob".to_string(),
+                            "Charly".to_string(), "Django".to_string()]);
+        group.members[0].balance = -1685;
+        group.members[1].balance = 316;
+        group.members[2].balance = 2117;
+        group.members[3].balance = -748;
+        let tas = Logic::balance_group(&group);
+        assert_eq!(tas[0], Transaction::new(&"Django".to_string(), &"Bob".to_string(), 316));
+        assert_eq!(tas[1], Transaction::new(&"Django".to_string(), &"Charly".to_string(), 432));
+        assert_eq!(tas[2], Transaction::new(&"Alice".to_string(), &"Charly".to_string(), 1685));
+    }
 
     #[test]
     fn test_delete_group_success() {
@@ -585,7 +726,7 @@ mod logic_tests {
             120, splitter.state.groups.last().unwrap(), vec!["Alice".to_string()], vec![], false);
         // alle - 120/3 = -40, Alice +120 | A80, B-40,c-40
         assert!(transaction_bins.is_ok());
-        let transaction_bins = transaction_bins.unwrap();
+        let (transaction_bins, _, _) = transaction_bins.unwrap();
         assert_eq!(transaction_bins.len(), 3);
         assert!(transaction_bins.contains_key("Alice"));
         assert!(transaction_bins.contains_key("Bob"));
@@ -613,7 +754,7 @@ mod logic_tests {
             vec!["Alice".to_string(), "Bob".to_string()], vec![], false);
         // alle - 120/4 = -30, Alice +60, Bob +60 | A30, B30, C-30, D-30
         assert!(transaction_bins.is_ok());
-        let transaction_bins = transaction_bins.unwrap();
+        let (transaction_bins, _, _) = transaction_bins.unwrap();
         assert_eq!(transaction_bins.len(), 4);
         assert!(transaction_bins.contains_key("Alice"));
         assert!(transaction_bins.contains_key("Bob"));
@@ -648,7 +789,7 @@ mod logic_tests {
         // Bob + 130
         // A-10, B-40+130=90, C-40, D-40
         assert!(transaction_bins.is_ok());
-        let transaction_bins = transaction_bins.unwrap();
+        let (transaction_bins, _, _) = transaction_bins.unwrap();
         assert_eq!(transaction_bins.len(), 4);
         assert!(transaction_bins.contains_key("Alice"));
         assert!(transaction_bins.contains_key("Bob"));
@@ -684,7 +825,7 @@ mod logic_tests {
         // Bob + 140
         // A-10, B-60+140=80, C-10, D-60
         assert!(transaction_bins.is_ok());
-        let transaction_bins = transaction_bins.unwrap();
+        let (transaction_bins, _, _) = transaction_bins.unwrap();
         assert_eq!(transaction_bins.len(), 4);
         assert!(transaction_bins.contains_key("Alice"));
         assert!(transaction_bins.contains_key("Bob"));
@@ -720,7 +861,7 @@ mod logic_tests {
         // Bob + 140
         // A-10-30=-40, B+140-30=110, C-10-30=-40, D-30
         assert!(transaction_bins.is_ok());
-        let transaction_bins = transaction_bins.unwrap();
+        let (transaction_bins, _, _) = transaction_bins.unwrap();
         assert_eq!(transaction_bins.len(), 4);
         assert!(transaction_bins.contains_key("Alice"));
         assert!(transaction_bins.contains_key("Bob"));

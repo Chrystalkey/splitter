@@ -86,9 +86,9 @@ print out statistics of the group (who owes whom how much)
 
 ### Balance
 
-`splitter balance [[--group] {group name}]` -> shows what has to be paid to whom and sets expenses such that everything
-is
-payed up afterwards
+`splitter balance [[--group] {group name}]` ->
+shows what has to be paid to whom and sets expenses such that everything
+is payed up afterwards, minimizing the transactions with small amounts
 
 ## Project State
 
@@ -102,3 +102,38 @@ payed up afterwards
     - [ ] undo
 - [ ] other features
     - [ ] interactive prompt if called with no arguments
+    - [ ] adding members to a group after creation
+
+## About splitting
+
+
+## About balance
+Principles that should hold for balance operations:
+- no one who gets money pays money
+- matching amounts should be settled with each other
+- larger settlements are preferable to smaller settlements
+- round settlements are prefereable
+
+This leads to
+1. settle matching amounts first
+2. settle up from small debts, meaning:
+   1. smallest debt pays smallest debtor, second smallest debtor until empty
+   2. second smallest pays leftover smallest debtor etc
+
+In practice this means:
+sort creditors by outstanding amount, asc
+sort debtors by payable amount, desc (abs asc)
+
+```python
+debtors = []
+creditors = []
+for debtor in debtors:
+  for creditor in creditors:
+    if creditor == -debtor:
+      match()
+
+sorted_debt = debtors.sort()
+sorted_cred = creditors.sort()
+for debtor in sorted_debt:
+...
+```
