@@ -58,15 +58,15 @@ Used like:
 
 ### Undo
 
-`splitter undo [{group name}] [{index}]` -> undo the last splitting action that was not an undo
-if group name is not specified, the currently selected group is used
-if index is not specified, the last splitting action that was not an undo from the group specified is undone
+`splitter undo [{group name}] [{index}]` -> undo a splitting action if group name is not specified, the currently
+selected group is used if index is not specified, the last splitting action that was not an undo from the group
+specified is undone
 
 ### Create
 
-`splitter create {group name} [--add {name} [{name} ...]]`
+`splitter create {group name} [--add {name}]+`
 
-Deletes the group specified as third argument
+Creates the group specified, and adds the members as specified
 
 ### List
 
@@ -82,13 +82,14 @@ print out statistics of the group (who owes whom how much)
 
 ### Delete Group
 
-`splitter delete-group {group name} [--group {group name}]`
+`splitter delete-group {group name}`
+Deletes the group specified
 
 ### Balance
 
 `splitter balance [[--group] {group name}]` ->
 shows what has to be paid to whom and sets expenses such that everything
-is payed up afterwards, minimizing the transactions with small amounts
+is payed up afterwards, minimizing tedious transactions and amount of transactions
 
 ## Project State
 
@@ -98,7 +99,7 @@ is payed up afterwards, minimizing the transactions with small amounts
     - [x] pay
     - [x] stat
     - [x] delete-group
-    - [ ] balance
+    - [x] balance
     - [ ] undo
 - [ ] other features
     - [ ] interactive prompt if called with no arguments
@@ -106,34 +107,22 @@ is payed up afterwards, minimizing the transactions with small amounts
 
 ## About splitting
 
-
 ## About balance
+
 Principles that should hold for balance operations:
+
 - no one who gets money pays money
 - matching amounts should be settled with each other
 - larger settlements are preferable to smaller settlements
 - round settlements are prefereable
 
 This leads to
+
 1. settle matching amounts first
 2. settle up from small debts, meaning:
-   1. smallest debt pays smallest debtor, second smallest debtor until empty
-   2. second smallest pays leftover smallest debtor etc
+    1. smallest debt pays smallest debtor, second smallest debtor until empty
+    2. second smallest pays leftover smallest debtor etc
 
 In practice this means:
 sort creditors by outstanding amount, asc
 sort debtors by payable amount, desc (abs asc)
-
-```python
-debtors = []
-creditors = []
-for debtor in debtors:
-  for creditor in creditors:
-    if creditor == -debtor:
-      match()
-
-sorted_debt = debtors.sort()
-sorted_cred = creditors.sort()
-for debtor in sorted_debt:
-...
-```

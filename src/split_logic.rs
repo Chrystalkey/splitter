@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::fmt::{Display, Formatter};
+use std::io::Write;
 use std::path::PathBuf;
 use std::string::ToString;
 use std::thread::sleep;
@@ -63,6 +64,8 @@ impl Group {
         let membrs = {
             let mut vec = Vec::with_capacity(members.len());
             for m in members {
+                assert!(Regex::new(Logic::NAME_REGEX).unwrap().is_match(m.as_str()),
+                        "Name {} is not allowed for members", m);
                 vec.push(Member::new(m));
             }
             vec
@@ -209,7 +212,7 @@ pub struct Logic {
 }
 
 impl Logic {
-    const NAME_REGEX: &'static str = r"^[a-zA-Z0-9][a-zA-Z0-9_\-()]+$";
+    const NAME_REGEX: &'static str = r"^[a-zA-Z0-9][a-zA-Z0-9_\-()]*$";
     pub fn new(source: PathBuf) -> Self {
         let state = SplitterState::new(source.clone());
         let current_group = if state.groups.is_empty() { None } else { Some(0) };
@@ -473,7 +476,7 @@ impl Logic {
         transactions
     }
     fn confirm() -> bool {
-        print!("Confirm? [yY|nN]: ");
+        println!("Confirm? [yY|nN]: ");
         let mut buffer = String::new();
         let stdin = io::stdin();
         stdin.read_line(&mut buffer).expect("stdin Input Error");
