@@ -104,6 +104,7 @@ is payed up afterwards, minimizing tedious transactions and amount of transactio
 - [ ] other features
     - [ ] interactive prompt if called with no arguments
     - [ ] adding members to a group after creation
+    - [ ] actual database backing instead of compressed yaml
 
 ## About splitting
 

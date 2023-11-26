@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::io;
 use std::fmt::{Display, Formatter};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::string::ToString;
 use std::thread::sleep;
 use std::time::Duration;
+use brotli::{CompressorReader, Decompressor};
+use brotli::enc::BrotliEncoderParams;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use crate::config::SubCommand;
@@ -87,7 +89,10 @@ impl SplitterState {
     fn new(source: PathBuf) -> Self {
         return if source.exists() {
             if source.is_file() {
-                serde_yaml::from_str(std::fs::read_to_string(source).unwrap().as_str()).unwrap()
+                let raw = std::fs::read(source).unwrap();
+                serde_yaml::from_str(
+                    Logic::decompress(raw.as_slice()).as_str()
+                ).unwrap()
             } else {
                 panic!("You specified '{:?}', which is not a file", source);
             }
@@ -575,10 +580,26 @@ impl Logic {
             SubCommand::Balance { group } => self.balance(group),
         };
     }
+    fn compress(input: String) -> Vec<u8> {
+        let params = BrotliEncoderParams::default();
+        let mut compressed = Vec::new();
+        let mut com_rdr =
+            CompressorReader::new(input.as_bytes(), 4096, 6, 22);
+        com_rdr.read_to_end(&mut compressed).unwrap();
+        return compressed;
+    }
+    fn decompress(input: &[u8]) -> String {
+        let mut decompressor = Decompressor::new(input, 4096);
+        let mut dec_data = String::new();
+        decompressor.read_to_string(&mut dec_data).unwrap();
+        return dec_data;
+    }
 
     pub(crate) fn save(&self) -> Result<(), InternalSplitterError> {
-        let file = std::fs::File::create(self.db_path.as_path())?;
-        serde_yaml::to_writer(file, &self.state)?;
+        let raw = serde_yaml::to_string(&self.state)?;
+        let result = Self::compress(raw);
+        let mut file = std::fs::File::create(self.db_path.as_path())?;
+        file.write_all(result.as_slice())?;
         Ok(())
     }
 }
