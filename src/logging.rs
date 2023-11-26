@@ -1,6 +1,6 @@
 use std::fmt::{Display, Formatter};
 use serde::{Deserialize, Serialize};
-use crate::split_logic::{Target, TransactionChange};
+use crate::logic::{Target, TransactionChange};
 
 #[derive(Serialize, Deserialize)]
 pub enum LoggedCommand {
