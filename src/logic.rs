@@ -92,6 +92,98 @@ impl Group {
         self.log.iter()
             .fold(accu, |a, e| format!("{a}{e}\n"))
     }
+    fn balance(&self) -> Vec<Transaction> {
+        let members = &self.members;
+        let mut creditors: Vec<Member> =
+            members.iter().filter(|&mem| mem.balance > 0).cloned().collect();
+        let mut debtors: Vec<Member> =
+            members.iter().filter(|&mem| mem.balance < 0).cloned().collect();
+        creditors.sort_unstable_by(|el1, el2| el1.balance.partial_cmp(&el2.balance).unwrap());
+        debtors.sort_unstable_by(
+            |el1, el2| el1.balance.abs().partial_cmp(&el2.balance.abs())
+                .unwrap());
+        let mut transactions = vec![];
+        // find matching c and d & match them up
+        for d in debtors.iter_mut() {
+            for c in creditors.iter_mut() {
+                if -d.balance < c.balance {
+                    break; // break the loop
+                }
+                if d.balance == -c.balance {
+                    transactions.push(Transaction::new(&d.name, &c.name, c.balance));
+                    d.balance = 0;
+                    c.balance = 0;
+                }
+            }
+        }
+
+        let mut c_idx = 0;
+        // non-matching loop
+        for d in debtors.iter_mut() {
+            if d.balance == 0 {
+                continue;
+            }
+            while creditors.get(c_idx).unwrap().balance == 0 {
+                c_idx += 1;
+            }
+            let mut c = creditors.get_mut(c_idx).unwrap();
+            if c.balance == -d.balance {
+                transactions.push(Transaction::new(&d.name, &c.name, c.balance));
+                d.balance = 0;
+                c.balance = 0;
+                c_idx += 1;
+                continue;
+            }
+            while c.balance < -d.balance {
+                d.balance += c.balance;
+                transactions.push(Transaction::new(&d.name, &c.name, c.balance));
+                c.balance = 0;
+                c_idx += 1;
+                c = creditors.get_mut(c_idx).unwrap();
+            }
+            if c.balance > -d.balance {
+                c.balance += d.balance;
+                transactions.push(Transaction::new(&d.name, &c.name, d.balance));
+                d.balance = 0;
+            }
+        }
+        transactions
+    }
+}
+
+#[cfg(test)]
+mod group_tests {
+    use super::*;
+
+    #[test]
+    fn test_balance_equal() {
+        let mut group =
+            Group::new("testgroup".to_string(),
+                       vec!["Alice".to_string(), "Bob".to_string()]);
+        group.members[0].balance = -10_00;
+        group.members[1].balance = 10_00;
+        let tas = group.balance();
+        assert_eq!(tas.len(), 1);
+        assert_eq!(tas[0].from, "Alice");
+        assert_eq!(tas[0].to, "Bob");
+        assert_eq!(tas[0].amount, 10_00);
+    }
+
+    #[test]
+    fn test_balance_unequal() {
+        let mut group =
+            Group::new("testgroup".to_owned(),
+                       vec!["Alice".to_string(), "Bob".to_string(),
+                            "Charly".to_string(), "Django".to_string()]);
+        group.members[0].balance = -1685;
+        group.members[1].balance = 316;
+        group.members[2].balance = 2117;
+        group.members[3].balance = -748;
+        let tas = group.balance();
+        assert_eq!(tas[0], Transaction::new(&"Django".to_string(), &"Bob".to_string(), 316));
+        assert_eq!(tas[1], Transaction::new(&"Django".to_string(), &"Charly".to_string(), 432));
+        assert_eq!(tas[2], Transaction::new(&"Alice".to_string(), &"Charly".to_string(), 1685));
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -419,63 +511,7 @@ impl Logic {
         // if balance rest is not specified, balance between the non-specified group members
         Ok((transaction_map, givers.0, recvrs.0))
     }
-    fn balance_group(group: &Group) -> Vec<Transaction> {
-        let members = &group.members;
-        let mut creditors: Vec<Member> =
-            members.iter().filter(|&mem| mem.balance > 0).cloned().collect();
-        let mut debtors: Vec<Member> =
-            members.iter().filter(|&mem| mem.balance < 0).cloned().collect();
-        creditors.sort_unstable_by(|el1, el2| el1.balance.partial_cmp(&el2.balance).unwrap());
-        debtors.sort_unstable_by(
-            |el1, el2| el1.balance.abs().partial_cmp(&el2.balance.abs())
-                .unwrap());
-        let mut transactions = vec![];
-        // find matching c and d & match them up
-        for d in debtors.iter_mut() {
-            for c in creditors.iter_mut() {
-                if -d.balance < c.balance {
-                    break; // break the loop
-                }
-                if d.balance == -c.balance {
-                    transactions.push(Transaction::new(&d.name, &c.name, c.balance));
-                    d.balance = 0;
-                    c.balance = 0;
-                }
-            }
-        }
 
-        let mut c_idx = 0;
-        // non-matching loop
-        for d in debtors.iter_mut() {
-            if d.balance == 0 {
-                continue;
-            }
-            while creditors.get(c_idx).unwrap().balance == 0 {
-                c_idx += 1;
-            }
-            let mut c = creditors.get_mut(c_idx).unwrap();
-            if c.balance == -d.balance {
-                transactions.push(Transaction::new(&d.name, &c.name, c.balance));
-                d.balance = 0;
-                c.balance = 0;
-                c_idx += 1;
-                continue;
-            }
-            while c.balance < -d.balance {
-                d.balance += c.balance;
-                transactions.push(Transaction::new(&d.name, &c.name, c.balance));
-                c.balance = 0;
-                c_idx += 1;
-                c = creditors.get_mut(c_idx).unwrap();
-            }
-            if c.balance > -d.balance {
-                c.balance += d.balance;
-                transactions.push(Transaction::new(&d.name, &c.name, d.balance));
-                d.balance = 0;
-            }
-        }
-        transactions
-    }
     fn confirm() -> bool {
         println!("Confirm? [yY|nN]: ");
         let mut buffer = String::new();
@@ -490,7 +526,7 @@ impl Logic {
     }
     fn balance(&mut self, group: String) {
         let group = self.state.get_group_mut(Some(group));
-        let transactions = Self::balance_group(group);
+        let transactions = group.balance();
         println!("The following transactions are recommended:");
         for t in &transactions {
             println!("{}", t);
@@ -511,6 +547,7 @@ impl Logic {
             }
         }
     }
+
     fn pay(&mut self, amount: i64, group: Option<String>, from: String, to: String) {
         let group = self.state.get_group_mut(group);
         // calculate transaction
@@ -603,35 +640,6 @@ impl Logic {
 mod logic_tests {
     use super::*;
 
-    #[test]
-    fn test_balance_equal() {
-        let mut group =
-            Group::new("testgroup".to_string(),
-                       vec!["Alice".to_string(), "Bob".to_string()]);
-        group.members[0].balance = -10_00;
-        group.members[1].balance = 10_00;
-        let tas = Logic::balance_group(&group);
-        assert_eq!(tas.len(), 1);
-        assert_eq!(tas[0].from, "Alice");
-        assert_eq!(tas[0].to, "Bob");
-        assert_eq!(tas[0].amount, 10_00);
-    }
-
-    #[test]
-    fn test_balance_unequal() {
-        let mut group =
-            Group::new("testgroup".to_owned(),
-                       vec!["Alice".to_string(), "Bob".to_string(),
-                            "Charly".to_string(), "Django".to_string()]);
-        group.members[0].balance = -1685;
-        group.members[1].balance = 316;
-        group.members[2].balance = 2117;
-        group.members[3].balance = -748;
-        let tas = Logic::balance_group(&group);
-        assert_eq!(tas[0], Transaction::new(&"Django".to_string(), &"Bob".to_string(), 316));
-        assert_eq!(tas[1], Transaction::new(&"Django".to_string(), &"Charly".to_string(), 432));
-        assert_eq!(tas[2], Transaction::new(&"Alice".to_string(), &"Charly".to_string(), 1685));
-    }
 
     #[test]
     fn test_delete_group_success() {
