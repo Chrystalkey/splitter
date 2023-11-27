@@ -1,13 +1,14 @@
 use std::fs;
 use clap::Parser;
 use crate::config::Cli;
-use crate::logic::Logic;
+use crate::logic::Splitter;
 
 mod logic;
 mod config;
 mod error;
 mod money;
 mod logging;
+mod group;
 
 fn main() {
     let cli = Cli::parse();
@@ -24,7 +25,7 @@ fn main() {
         } else {
             cli.database.unwrap().into()
         };
-        let mut logic = Logic::new(dbpath);
+        let mut logic = Splitter::new(dbpath);
         logic.run(cli.command.unwrap());
         logic.save().expect("Could not save the Internal State to disk");
     }
