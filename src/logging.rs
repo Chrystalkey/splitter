@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::logic::{Target, TransactionChange};
 
 #[derive(Serialize, Deserialize)]
-pub enum LoggedCommand {
+pub(crate) enum LoggedCommand {
     Split {
         name: String,
         amount: i64,
@@ -58,13 +58,13 @@ impl Display for LoggedCommand {
                            if *balance_rest { ", balancing the rest" } else { "" })
                 }
             }
-            Self::Undo(_0) => { todo!("Undo is not implemented right now") }
+            Self::Undo(_) => { todo!("Undo is not implemented right now") }
         }
     }
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct LogEntry {
+pub(crate) struct LogEntry {
     command: LoggedCommand,
     change: TransactionChange,
 }
