@@ -87,8 +87,9 @@ impl Group {
             format!("Group Statistics for group {} ({}):\n\
         Members:\n\
         ", self.name, self.currency);
+
         for mem in &self.members {
-            string = format!("{}\n{}: {:.02}€", string, mem.name, mem.balance as f32 / 100.);
+            string = format!("{}\n{}: {:.02}{}", string, mem.name, mem.balance as f32 / self.currency.subdivision(), self.currency);
         }
         string
     }

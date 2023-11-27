@@ -12,7 +12,7 @@ pub enum Currency {
 }
 
 impl Currency {
-    fn subdivision(&self) -> f32 {
+    pub(crate) fn subdivision(&self) -> f32 {
         match self {
             Self::EUR |
             Self::USD |
