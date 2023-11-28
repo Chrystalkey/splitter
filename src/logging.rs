@@ -83,6 +83,6 @@ impl LogEntry {
         self.change.iter().map(|(k, &v)| (k.clone(), -v)).collect()
     }
     pub fn to_string(&self, curr: Currency) -> String {
-        format!("{}", self.command.to_string(curr))
+        self.command.to_string(curr)
     }
 }

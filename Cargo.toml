@@ -11,5 +11,6 @@ chrono = "0.4.31"
 clap = { version = "4.4.6", features = ["derive"] }
 dirs = "5.0.1"
 regex = "1.9.6"
+rusqlite = "0.30.0"
 serde = { version = "1.0.192", features = ["derive"] }
 serde_yaml = "0.9.27"

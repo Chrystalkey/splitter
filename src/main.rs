@@ -26,7 +26,11 @@ fn main() {
             cli.database.unwrap().into()
         };
         let mut logic = Splitter::new(dbpath);
-        logic.run(cli.command.unwrap());
-        logic.save().expect("Could not save the Internal State to disk");
+        let ret = logic.run(cli.command.unwrap());
+        if let Err(r) = ret {
+            eprintln!("{:?}", r);
+        } else {
+            logic.save().expect("Could not save the Internal State to disk");
+        }
     }
 }

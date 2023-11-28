@@ -1,14 +1,18 @@
 use std::io::Error;
 use std::num::ParseFloatError;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum InternalSplitterError {
     InvalidNumberFormat(String),
-    InvalidFormat(String),
+    InvalidTargetFormat(String),
     InvalidSemantic(String),
     InvalidName(String),
+    DatabaseReadError(String),
     FileError(String),
+    GroupNotFound,
+    MemberNotFound(String),
 }
+// todo: impl Display for InternalSplitterError
 
 impl From<ParseFloatError> for InternalSplitterError {
     fn from(value: ParseFloatError) -> Self {
@@ -26,7 +30,7 @@ impl From<Error> for InternalSplitterError {
 
 impl From<serde_yaml::Error> for InternalSplitterError {
     fn from(value: serde_yaml::Error) -> Self {
-        Self::InvalidFormat(
+        Self::DatabaseReadError(
             format!("{:?}", value)
         )
     }

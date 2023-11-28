@@ -50,29 +50,33 @@ impl SplitterState {
     }
 
     /// get a reference to the group or panic
-    fn get_group(&self, group_name: Option<String>) -> &Group {
+    fn get_group(&self, group_name: Option<String>) -> Result<&Group, InternalSplitterError> {
         let group = match group_name {
-            None => (self.groups.get(self.current_group.unwrap_or(0)))
-                .expect("Error: No group was found"),
+            None => self.groups.get(self.current_group.unwrap_or(0)),
             Some(name) => self.groups.iter().find(|&gn| gn.name == name)
-                .expect("Error: Could not find a group with this name")
         };
-        group
+        if let Some(g) = group {
+            Ok(g)
+        } else {
+            Err(InternalSplitterError::GroupNotFound)
+        }
     }
-    fn get_group_mut(&mut self, group_name: Option<String>) -> &mut Group {
+    fn get_group_mut(&mut self, group_name: Option<String>) -> Result<&mut Group, InternalSplitterError> {
         let group = match group_name {
-            None => (self.groups.get_mut(self.current_group.unwrap_or(0)))
-                .expect("Error: No group was found"),
+            None => self.groups.get_mut(self.current_group.unwrap_or(0)),
             Some(name) => self.groups.iter_mut().find(|gn| gn.name == name)
-                .expect("Error: Could not find a group with this name")
         };
-        group
+        if let Some(g) = group {
+            Ok(g)
+        } else {
+            Err(InternalSplitterError::GroupNotFound)
+        }
     }
-    fn delete_group(&mut self, group_name: String, yes: bool) {
+    fn delete_group(&mut self, group_name: String, yes: bool) -> Result<(), InternalSplitterError> {
         println!("This will delete the group '{}' forever with no more undo options available.\n",
                  group_name);
         {
-            let group = self.get_group_mut(Some(group_name.clone()));
+            let group = self.get_group_mut(Some(group_name.clone()))?;
             group.stat();
         }
         let really = yes || Splitter::confirm();
@@ -88,6 +92,7 @@ impl SplitterState {
         } else { // !confirm && !yes
             println!("Operation Cancelled");
         }
+        Ok(())
     }
 }
 
@@ -103,27 +108,29 @@ mod splitterstate_tests {
                        vec!["Alice".to_string(), "Bob".to_string(), "Charly".to_string()], None);
         let mut splitterstate = SplitterState {
             version: Splitter::CURRENT_VERSION.to_string(),
-            groups: vec![group],
+            groups: vec![group.unwrap()],
             current_group: Some(0),
         };
         assert_eq!(splitterstate.groups.len(), 1);
-        splitterstate.delete_group("testgroup".to_string(), true);
+        let r = splitterstate.delete_group("testgroup".to_string(), true);
+        assert!(r.is_ok());
         assert_eq!(splitterstate.groups.len(), 0);
     }
 
     #[test]
-    #[should_panic]
     fn test_delete_group_failure() {
         let group =
             Group::new("testgroup".to_owned(),
                        vec!["Alice".to_string(), "Bob".to_string(), "Charly".to_string()], None);
         let mut splitterstate = SplitterState {
             version: Splitter::CURRENT_VERSION.to_string(),
-            groups: vec![group],
+            groups: vec![group.unwrap()],
             current_group: Some(0),
         };
         assert_eq!(splitterstate.groups.len(), 1);
-        splitterstate.delete_group("txt".to_string(), true);
+        let r = splitterstate.delete_group("txt".to_string(), true);
+        assert!(r.is_err());
+        assert_eq!(r.unwrap_err(), InternalSplitterError::GroupNotFound);
     }
 }
 
@@ -140,7 +147,7 @@ impl Target {
     fn parse(input: &str, total_money: i64) -> Result<Self, InternalSplitterError> {
         let in_split: Vec<_> = input.trim_end_matches('%').split(':').collect();
         if in_split[0].is_empty() {
-            return Err(InternalSplitterError::InvalidFormat(
+            return Err(InternalSplitterError::InvalidTargetFormat(
                 "Please use the format <name>:[<number>[%]]. (maybe you forgot ':'?".to_string()));
         }
         if in_split.len() == 2 {
@@ -166,7 +173,7 @@ impl Target {
                 amount: None,
             })
         } else {
-            Err(InternalSplitterError::InvalidFormat(
+            Err(InternalSplitterError::InvalidTargetFormat(
                 "Please use the format <name>:[<number>[%]]. (maybe you forgot ':'?".to_string()))
         }
     }
@@ -299,13 +306,13 @@ impl Splitter {
         stdin.read_line(&mut buffer).expect("stdin Input Error");
         if buffer.starts_with(['y', 'Y']) {
             sleep(Duration::from_secs(2));
-            return true;
+            true
         } else {
-            return false;
+            false
         }
     }
-    fn balance(&mut self, group: Option<String>) {
-        let group = self.state.get_group_mut(group);
+    fn balance(&mut self, group: Option<String>) -> Result<(), InternalSplitterError> {
+        let group = self.state.get_group_mut(group)?;
         let mut transactions = group.balance();
         println!("The following transactions are recommended:");
         for t in &transactions {
@@ -324,28 +331,30 @@ impl Splitter {
                     );
             group.apply_tachange(tac);
         }
+        Ok(())
     }
 
-    pub(crate) fn run(&mut self, command: SubCommand) {
+    pub(crate) fn run(&mut self, command: SubCommand) -> Result<(), InternalSplitterError> {
         match command {
             SubCommand::Create { name, members } => {
-                assert!(Regex::new(Splitter::NAME_REGEX).unwrap().is_match(name.as_str()),
-                        "Please only use alphanumeric names and _-(), starting with one of the former");
-                self.state.groups.push(Group::new(name, members, None));
+                if !Regex::new(Splitter::NAME_REGEX).unwrap().is_match(name.as_str()) {
+                    return Err(InternalSplitterError::InvalidName(name));
+                }
+                self.state.groups.push(Group::new(name, members, None)?);
             }
             SubCommand::Undo { group, index } => {
                 let _ = (group, index);
                 todo!("Undo is not implemented")
             }
             SubCommand::DeleteGroup { group, yes } =>
-                self.state.delete_group(group, yes.unwrap_or(false)),
+                self.state.delete_group(group, yes.unwrap_or(false))?,
             SubCommand::List { group, all } => {
                 if all.unwrap_or(false) {
                     for g in &self.state.groups {
                         println!("{}\n", g.list());
                     }
                 } else {
-                    let group = self.state.get_group(group);
+                    let group = self.state.get_group(group)?;
                     println!("\n{}\n", group.list());
                 }
             }
@@ -355,28 +364,29 @@ impl Splitter {
                         println!("{}\n", g.stat());
                     }
                 } else {
-                    let group = self.state.get_group(group);
+                    let group = self.state.get_group(group)?;
                     println!("{}", group.stat());
                 }
             }
             SubCommand::Pay { amount, group, from, to } =>
                 {
-                    let group = self.state.get_group_mut(group);
+                    let group = self.state.get_group_mut(group)?;
                     group.log_pay_transaction(
                         (amount * group.currency.subdivision()) as Money,
                         from,
                         to,
-                    );
+                    )?;
                 }
             SubCommand::Split {
                 amount, group, from, to, name, balance_rest
             } => {
-                let group = self.state.get_group_mut(group);
+                let group = self.state.get_group_mut(group)?;
                 group.split((amount * 100.) as i64, from, to, name,
-                            balance_rest.unwrap_or(false))
+                            balance_rest.unwrap_or(false))?
             }
-            SubCommand::Balance { group } => self.balance(Some(group)),
+            SubCommand::Balance { group } => self.balance(Some(group))?,
         };
+        Ok(())
     }
     fn compress(input: String) -> Vec<u8> {
         let mut compressed = Vec::new();
