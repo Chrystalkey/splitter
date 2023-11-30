@@ -11,6 +11,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use crate::config::SubCommand;
 use crate::error::InternalSplitterError;
+use crate::error::InternalSplitterError::GroupNotFound;
 use crate::group::Group;
 
 pub(crate) type Money = i64;
@@ -58,7 +59,7 @@ impl SplitterState {
         if let Some(g) = group {
             Ok(g)
         } else {
-            Err(InternalSplitterError::GroupNotFound)
+            Err(GroupNotFound)
         }
     }
     fn get_group_mut(&mut self, group_name: Option<String>) -> Result<&mut Group, InternalSplitterError> {
@@ -69,8 +70,25 @@ impl SplitterState {
         if let Some(g) = group {
             Ok(g)
         } else {
-            Err(InternalSplitterError::GroupNotFound)
+            Err(GroupNotFound)
         }
+    }
+    fn get_group_idx(&mut self, group_name: Option<String>) -> Result<usize, InternalSplitterError> {
+        if self.groups.is_empty() {
+            return Err(GroupNotFound);
+        }
+        let gidx = match group_name {
+            None => self.current_group.unwrap_or(0),
+            Some(name) => {
+                let idx = self.groups.iter().enumerate().find(|(_, g)|
+                    g.name == name).map(|(n, _)| n);
+                if idx.is_none() {
+                    return Err(GroupNotFound);
+                }
+                idx.unwrap()
+            }
+        };
+        Ok(gidx)
     }
     fn delete_group(&mut self, group_name: String, yes: bool) -> Result<(), InternalSplitterError> {
         println!("This will delete the group '{}' forever with no more undo options available.\n",
@@ -92,6 +110,7 @@ impl SplitterState {
         } else { // !confirm && !yes
             println!("Operation Cancelled");
         }
+        self.current_group = None;
         Ok(())
     }
 }
@@ -341,10 +360,16 @@ impl Splitter {
                     return Err(InternalSplitterError::InvalidName(name));
                 }
                 self.state.groups.push(Group::new(name, members, None)?);
+                self.state.current_group = Some(self.state.groups.len() - 1);
             }
             SubCommand::Undo { group, index } => {
-                let _ = (group, index);
-                todo!("Undo is not implemented")
+                let group = self.state.get_group_mut(group)?;
+                let (lentry, currency) = (group.get_log(index)?, group.currency);
+                println!("You are about to undo\n`{}`", lentry.to_string(currency));
+                println!("This cannot be reversed");
+                group.apply_tachange(lentry.reversed_change());
+                group.remove_log(index)?;
+                println!("Success");
             }
             SubCommand::DeleteGroup { group, yes } =>
                 self.state.delete_group(group, yes.unwrap_or(false))?,
@@ -354,8 +379,10 @@ impl Splitter {
                         println!("{}\n", g.list());
                     }
                 } else {
+                    let gidx = self.state.get_group_idx(group.clone())?;
                     let group = self.state.get_group(group)?;
                     println!("\n{}\n", group.list());
+                    self.state.current_group = Some(gidx);
                 }
             }
             SubCommand::Stat { group, all } => {
@@ -364,30 +391,46 @@ impl Splitter {
                         println!("{}\n", g.stat());
                     }
                 } else {
+                    let gidx = self.state.get_group_idx(group.clone())?;
                     let group = self.state.get_group(group)?;
                     println!("{}", group.stat());
+                    self.state.current_group = Some(gidx);
                 }
             }
             SubCommand::Pay { amount, group, from, to } =>
                 {
+                    let gidx = self.state.get_group_idx(group.clone())?;
                     let group = self.state.get_group_mut(group)?;
                     group.log_pay_transaction(
                         (amount * group.currency.subdivision()) as Money,
                         from,
                         to,
                     )?;
+                    self.state.current_group = Some(gidx);
                 }
             SubCommand::Split {
-                amount, group, from, to, name, balance_rest
+                amount,
+                group,
+                from,
+                to,
+                name,
+                balance_rest,
             } => {
+                let gidx = self.state.get_group_idx(group.clone())?;
                 let group = self.state.get_group_mut(group)?;
                 group.split((amount * 100.) as i64, from, to, name,
-                            balance_rest.unwrap_or(false))?
+                            balance_rest.unwrap_or(false))?;
+                self.state.current_group = Some(gidx);
             }
-            SubCommand::Balance { group } => self.balance(Some(group))?,
+            SubCommand::Balance { group } => {
+                let gidx = self.state.get_group_idx(Some(group.clone()))?;
+                self.balance(Some(group))?;
+                self.state.current_group = Some(gidx);
+            }
         };
         Ok(())
     }
+
     fn compress(input: String) -> Vec<u8> {
         let mut compressed = Vec::new();
         let mut com_rdr =
@@ -395,6 +438,7 @@ impl Splitter {
         com_rdr.read_to_end(&mut compressed).unwrap();
         compressed
     }
+
     fn decompress(input: &[u8]) -> String {
         let mut decompressor = Decompressor::new(input, 4096);
         let mut dec_data = String::new();
@@ -408,5 +452,38 @@ impl Splitter {
         let mut file = std::fs::File::create(self.db_path.as_path())?;
         file.write_all(result.as_slice())?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod splitter_tests {
+    #[test]
+    fn test_create() {
+        todo!()
+    }
+
+    #[test]
+    fn test_delete() {
+        todo!()
+    }
+
+    #[test]
+    fn test_split() {
+        todo!()
+    }
+
+    #[test]
+    fn test_balance() {
+        todo!()
+    }
+
+    #[test]
+    fn test_pay() {
+        todo!()
+    }
+
+    #[test]
+    fn test_undo() {
+        todo!()
     }
 }

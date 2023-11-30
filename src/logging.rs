@@ -17,11 +17,6 @@ pub(crate) enum LoggedCommand {
         from: String,
         to: String,
     },
-    Undo(Box<LoggedCommand>),
-    Create {
-        name: String,
-        members: Vec<String>,
-    },
 }
 
 impl LoggedCommand {
@@ -29,9 +24,6 @@ impl LoggedCommand {
         match self {
             Self::Pay { from, to, amount } => {
                 format!("pay: {}\t to {}\t: {}{}", from, to, *amount as f32 / curr.subdivision(), curr)
-            }
-            Self::Create { name, members } => {
-                format!("create: group `{}` with members {:#?}", name, members)
             }
             Self::Split { name, amount, from, to, group, balance_rest } => {
                 let from = from.iter()
@@ -58,7 +50,6 @@ impl LoggedCommand {
                             if *balance_rest { ", balancing the rest" } else { "" })
                 }
             }
-            Self::Undo(_) => { todo!("Undo is not implemented right now") }
         }
     }
 }
@@ -66,7 +57,7 @@ impl LoggedCommand {
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct LogEntry {
-    command: LoggedCommand,
+    pub(crate) command: LoggedCommand,
     change: TransactionChange,
 }
 

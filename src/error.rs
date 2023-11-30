@@ -11,6 +11,7 @@ pub enum InternalSplitterError {
     FileError(String),
     GroupNotFound,
     MemberNotFound(String),
+    LogEntryNotFound,
 }
 // todo: impl Display for InternalSplitterError
 

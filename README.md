@@ -127,3 +127,24 @@ This leads to
 In practice this means:
 sort creditors by outstanding amount, asc
 sort debtors by payable amount, desc (abs asc)
+
+## About undo
+undoable commands are
+- split
+- pay
+- create group
+
+listings should include numbered log entries
+undo without arguments should undo the last command
+
+- fetch the last group
+- fetch the last log entry
+- commence undoing
+
+undo with a number should undo the list with that number of the last group
+
+- fetch the last group
+- fetch the log entry with that number
+- commence undoing
+
+undo with a group and number argument should do just what it says.

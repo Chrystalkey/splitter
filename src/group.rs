@@ -51,6 +51,23 @@ impl Group {
             log: vec![],
         })
     }
+    pub(crate) fn get_log(&self, index: Option<usize>) -> Result<&LogEntry, InternalSplitterError> {
+        if self.log.is_empty() {
+            return Err(InternalSplitterError::LogEntryNotFound);
+        }
+        let index = index.unwrap_or(self.log.len() - 1);
+        self.log.get(index).ok_or(InternalSplitterError::LogEntryNotFound)
+    }
+    pub(crate) fn remove_log(&mut self, index: Option<usize>) -> Result<LogEntry, InternalSplitterError> {
+        if self.log.is_empty() {
+            return Err(InternalSplitterError::LogEntryNotFound);
+        }
+        let index = index.unwrap_or(self.log.len() - 1);
+        if index >= self.log.len() {
+            return Err(InternalSplitterError::LogEntryNotFound);
+        }
+        Ok(self.log.remove(index))
+    }
     pub(crate) fn stat(&self) -> String {
         let mut string =
             format!("Group Statistics for group {} ({}):\n\
@@ -328,6 +345,42 @@ mod group_tests {
     }
 
     #[test]
+    fn remove_log_test() {
+        let mut group = setup_group();
+        {
+            let r = group.log_pay_transaction(12, "Alice".into(), "Bob".into());
+            assert!(r.is_ok());
+            let r = group.log_pay_transaction(13, "Alice".into(), "Bob".into());
+            assert!(r.is_ok());
+            let r = r.unwrap();
+            assert_eq!(group.log.len(), 2);
+            let r = group.remove_log(Some(1));
+            assert!(r.is_ok());
+            assert_eq!(group.log.len(), 1);
+            match &group.log[0].command {
+                LoggedCommand::Pay { amount, from, to } => {
+                    assert_eq!(*amount, 12);
+                    assert_eq!(from, "Alice");
+                    assert_eq!(to, "Bob");
+                }
+                _ => unreachable!("Command is not expected Variant")
+            }
+            let r = group.remove_log(Some(0));
+            assert!(r.is_ok());
+            assert_eq!(group.log.len(), 0);
+        }
+        {
+            let r = group.log_pay_transaction(12, "Alice".into(), "Bob".into());
+            assert!(r.is_ok());
+            let r = group.log_pay_transaction(13, "Alice".into(), "Bob".into());
+            assert!(r.is_ok());
+            let r = group.remove_log(None);
+            assert!(r.is_ok());
+            assert_eq!(group.log.len(), 1);
+        }
+    }
+
+    #[test]
     fn test_split_equal_among() {
         // test positive values
         // test "perfect" split
@@ -391,31 +444,27 @@ mod group_tests {
 
     #[test]
     fn test_simple_split_one_giver() {
-        let group =
-            Group::new("testgroup".to_owned(),
-                       vec!["Alice".to_string(), "Bob".to_string(), "Charly".to_string()],
-                       None).unwrap();
+        let group = setup_group();
 
         let transaction_bins = split_into_transaction(
             120, &group, vec!["Alice".to_string()], vec![], false);
-        // alle - 120/3 = -40, Alice +120 | A80, B-40,c-40
+        // alle - 120/4 = -30, Alice +120 | A90, B-30,c-30, D-30
         assert!(transaction_bins.is_ok());
         let (transaction_bins, _, _) = transaction_bins.unwrap();
-        assert_eq!(transaction_bins.len(), 3);
+        assert_eq!(transaction_bins.len(), 4);
         assert!(transaction_bins.contains_key("Alice"));
         assert!(transaction_bins.contains_key("Bob"));
         assert!(transaction_bins.contains_key("Charly"));
-        assert_eq!(transaction_bins["Alice"], 80);
-        assert_eq!(transaction_bins["Bob"], -40);
-        assert_eq!(transaction_bins["Charly"], -40);
+        assert!(transaction_bins.contains_key("Django"));
+        assert_eq!(transaction_bins["Alice"], 90);
+        assert_eq!(transaction_bins["Bob"], -30);
+        assert_eq!(transaction_bins["Charly"], -30);
+        assert_eq!(transaction_bins["Charly"], -30);
     }
 
     #[test]
     fn test_multiple_givers() {
-        let group =
-            Group::new("testgroup".to_owned(),
-                       vec!["Alice".to_string(), "Bob".to_string(),
-                            "Charly".to_string(), "Django".to_string()], None).unwrap();
+        let group = setup_group();
 
         let transaction_bins = split_into_transaction(
             120, &group,
@@ -436,10 +485,7 @@ mod group_tests {
 
     #[test]
     fn test_one_to() {
-        let group =
-            Group::new("testgroup".to_owned(),
-                       vec!["Alice".to_string(), "Bob".to_string(),
-                            "Charly".to_string(), "Django".to_string()], None).unwrap();
+        let group = setup_group();
 
         let transaction_bins = split_into_transaction(
             130, &group,
@@ -465,10 +511,7 @@ mod group_tests {
 
     #[test]
     fn test_multiple_to() {
-        let group =
-            Group::new("testgroup".to_owned(),
-                       vec!["Alice".to_string(), "Bob".to_string(),
-                            "Charly".to_string(), "Django".to_string()], None).unwrap();
+        let group = setup_group();
 
         let transaction_bins = split_into_transaction(
             140, &group,
@@ -495,11 +538,7 @@ mod group_tests {
 
     #[test]
     fn test_balance_rest() {
-        let group =
-            Group::new("testgroup".to_owned(),
-                       vec!["Alice".to_string(), "Bob".to_string(),
-                            "Charly".to_string(), "Django".to_string()], None).unwrap();
-
+        let group = setup_group();
         let transaction_bins = split_into_transaction(
             140, &group,
             vec!["Bob".to_string()],
@@ -521,5 +560,11 @@ mod group_tests {
         assert_eq!(transaction_bins["Bob"], 110);
         assert_eq!(transaction_bins["Charly"], -40);
         assert_eq!(transaction_bins["Django"], -30);
+    }
+
+    fn setup_group() -> Group {
+        Group::new("testgroup".to_owned(),
+                   vec!["Alice".to_string(), "Bob".to_string(),
+                        "Charly".to_string(), "Django".to_string()], None).unwrap()
     }
 }
