@@ -352,7 +352,6 @@ mod group_tests {
             assert!(r.is_ok());
             let r = group.log_pay_transaction(13, "Alice".into(), "Bob".into());
             assert!(r.is_ok());
-            let r = r.unwrap();
             assert_eq!(group.log.len(), 2);
             let r = group.remove_log(Some(1));
             assert!(r.is_ok());

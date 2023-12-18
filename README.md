@@ -93,18 +93,17 @@ is payed up afterwards, minimizing tedious transactions and amount of transactio
 
 ## Project State
 
-- [ ] commands
+- [x] commands
     - [x] create
     - [x] split
     - [x] pay
     - [x] stat
     - [x] delete-group
     - [x] balance
-    - [ ] undo
+    - [x] undo
 - [ ] other features
     - [ ] interactive prompt if called with no arguments
-    - [ ] adding members to a group after creation
-    - [ ] actual database backing instead of compressed yaml
+    - [ ] adding / removing members of a group after creation
 
 ## About splitting
 
