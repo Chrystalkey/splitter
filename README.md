@@ -115,7 +115,7 @@ If more than one member is specified, `--force` applies to all of them.
     - [x] undo
 - [ ] other features
     - [ ] interactive prompt if called with no arguments
-    - [ ] adding / removing members of a group after creation
+    - [x] adding / removing members of a group after creation
     - [ ] test cases that work on the executable directly
 
 ## About splitting
