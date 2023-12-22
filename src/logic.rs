@@ -355,6 +355,14 @@ impl Splitter {
 
     pub(crate) fn run(&mut self, command: SubCommand) -> Result<(), InternalSplitterError> {
         match command {
+            SubCommand::Add { group, members } => {
+                let group = self.state.get_group_mut(group)?;
+                group.add(members)?;
+            }
+            SubCommand::Remove { group, force, members } => {
+                let group = self.state.get_group_mut(group)?;
+                group.remove(members, force.unwrap_or(false))?;
+            }
             SubCommand::Create { name, members } => {
                 if !Regex::new(Splitter::NAME_REGEX).unwrap().is_match(name.as_str()) {
                     return Err(InternalSplitterError::InvalidName(name));

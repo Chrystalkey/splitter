@@ -74,4 +74,16 @@ pub(crate) enum SubCommand {
     Balance {
         group: String
     },
+    Add {
+        #[arg(short = 'g', long = "group")]
+        group: Option<String>,
+        members: Vec<String>,
+    },
+    Remove {
+        #[arg(short = 'g', long = "group")]
+        group: Option<String>,
+        #[arg(short = 'f', long = "force")]
+        force: Option<bool>,
+        members: Vec<String>,
+    },
 }

@@ -1,32 +1,17 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use crate::error::InternalSplitterError;
 use crate::logging::{LogEntry, LoggedCommand};
+use crate::logging::LoggedCommand::Split;
 use crate::logic::{Money, Splitter, Target, Transaction, TransactionChange};
 use crate::money::Currency;
-
-#[derive(Serialize, Deserialize, Clone)]
-struct Member {
-    name: String,
-    balance: Money,
-}
-
-impl Member {
-    fn new(name: String) -> Self {
-        Member {
-            name,
-            balance: 0,
-        }
-    }
-}
-
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Group {
     pub(crate) name: String,
     pub(crate) currency: Currency,
-    members: Vec<Member>,
+    members: HashMap<String, Money>,
     log: Vec<LogEntry>,
 }
 
@@ -35,14 +20,14 @@ impl Group {
         if members.is_empty() {
             return Err(InternalSplitterError::InvalidSemantic("Group must have at least one member".into()));
         }
-        let membrs = {
-            let mut vec = Vec::with_capacity(members.len());
+        let mut membrs = {
+            let mut map = HashMap::with_capacity(members.len());
             for m in members {
                 assert!(Regex::new(Splitter::NAME_REGEX).unwrap().is_match(m.as_str()),
                         "Name {} is not allowed for members", m);
-                vec.push(Member::new(m));
+                map.insert(m, 0);
             }
-            vec
+            map
         };
         Ok(Self {
             name,
@@ -74,8 +59,8 @@ impl Group {
         Members:\n\
         ", self.name, self.currency);
 
-        for mem in &self.members {
-            string = format!("{}\n{}: {:.02}{}", string, mem.name, mem.balance as f32 / self.currency.subdivision(), self.currency);
+        for (name, balance) in &self.members {
+            string = format!("{}\n{}: {:.02}{}", string, name, *balance as f32 / self.currency.subdivision(), self.currency);
         }
         string
     }
@@ -86,10 +71,18 @@ impl Group {
     }
     pub(crate) fn balance(&self) -> Vec<Transaction> {
         let members = &self.members;
+        struct Member {
+            name: String,
+            balance: Money,
+        }
         let mut creditors: Vec<Member> =
-            members.iter().filter(|&mem| mem.balance > 0).cloned().collect();
+            members.iter().filter(|&(_, balance)| *balance > 0)
+                .map(|(name, balance)| Member { name: name.clone(), balance: *balance })
+                .collect();
         let mut debtors: Vec<Member> =
-            members.iter().filter(|&mem| mem.balance < 0).cloned().collect();
+            members.iter().filter(|&(_, balance)| *balance < 0)
+                .map(|(name, balance)| Member { name: name.clone(), balance: *balance })
+                .collect();
         creditors.sort_unstable_by(|el1, el2| el1.balance.partial_cmp(&el2.balance).unwrap());
         debtors.sort_unstable_by(
             |el1, el2| el1.balance.abs().partial_cmp(&el2.balance.abs())
@@ -141,9 +134,48 @@ impl Group {
         }
         transactions
     }
+    pub(crate) fn add(&mut self, mut members: Vec<String>) -> Result<(), InternalSplitterError> {
+        let mut duplicates = vec![];
+        let mut errors = vec![];
+        for member in members.drain(..) {
+            if self.members.contains_key(&member) {
+                duplicates.push(member);
+            } else if !Regex::new(Splitter::NAME_REGEX)
+                .unwrap().is_match(member.as_str()) {
+                errors.push(member);
+            } else {
+                self.members.insert(member, 0);
+            }
+        }
+        if duplicates.is_empty() && errors.is_empty() {
+            Ok(())
+        } else {
+            Err(InternalSplitterError::InvalidName(
+                format!("duplicates: {:#?}\ninvalid names: {:#?}", duplicates, errors)))
+        }
+    }
+    pub(crate) fn remove(&mut self, mut members: Vec<String>, force: bool) -> Result<(), InternalSplitterError> {
+        let mut errors = vec![];
+        for member in members.drain(..) {
+            if !self.members.contains_key(&member) ||
+                (*self.members.get(&member).unwrap() != 0 && !force) {
+                errors.push(member);
+            } else {
+                self.members.remove(&member);
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(InternalSplitterError::InvalidName(
+                format!("Could not remove some members: Probably they either have to pay money, get money,\
+                 or they do not appear in the list:\n{:?}", errors)
+            ))
+        }
+    }
     pub(crate) fn apply_tachange(&mut self, tac: TransactionChange) {
-        for m in self.members.iter_mut() {
-            m.balance += tac.get(m.name.as_str()).unwrap()
+        for (name, balance) in self.members.iter_mut() {
+            *balance += tac.get(name.as_str()).unwrap();
         }
     }
     pub(crate) fn log_pay_transaction(&mut self, amount: i64, from: String, to: String) -> Result<(), InternalSplitterError> {
@@ -154,13 +186,13 @@ impl Group {
 
         // apply transaction
         let mut found_both = 0;
-        for m in &mut self.members {
-            if m.name == from {
+        for (name, balance) in self.members.iter_mut() {
+            if name == &from {
                 found_both += 1;
-                m.balance += amount;
-            } else if m.name == to {
+                *balance += amount;
+            } else if name == &to {
                 found_both += 1;
-                m.balance -= amount;
+                *balance -= amount;
             }
             if found_both == 2 {
                 break;
@@ -198,8 +230,8 @@ impl Group {
             transaction.clone(),
         ));
         // set values according to the transaction bin
-        for member in &mut self.members {
-            member.balance += *transaction.get(member.name.as_str()).unwrap();
+        for (name, balance) in &mut self.members {
+            *balance += *transaction.get(name.as_str()).unwrap();
         }
         Ok(())
     }
@@ -245,6 +277,10 @@ fn split_into_transaction(total_amount: Money, group: &Group,
         return Err(InternalSplitterError::InvalidSemantic(
             "Amounts of --from directives must either contain a catch-all or be >= amounts specified by --to".to_string()
         ));
+    } else if
+    recvrs.0.iter().any(|el| !group.members.contains_key(&el.member)) ||
+        givers.0.iter().any(|el| !group.members.contains_key(&el.member)) {
+        return Err(InternalSplitterError::InvalidName(format!("Please only specify members within the group")));
     }
     // normalize givers to contain entries for all members of the group
     let moneysplit =
@@ -253,17 +289,17 @@ fn split_into_transaction(total_amount: Money, group: &Group,
     let mut transaction_map = HashMap::with_capacity(group.members.len());
 
     // positively add all the froms
-    for mem in &group.members {
-        if let Some(giver) = givers.0.iter().find(|&target| target.member == mem.name)
+    for (name, _) in &group.members {
+        if let Some(giver) = givers.0.iter().find(|&target| &target.member == name)
         {
             if let Some(amount) = giver.amount {
-                transaction_map.insert(mem.name.clone(), amount);
+                transaction_map.insert(name.clone(), amount);
             } else {
-                transaction_map.insert(mem.name.clone(), moneysplit[wcg_index]);
+                transaction_map.insert(name.clone(), moneysplit[wcg_index]);
                 wcg_index += 1;
             }
         } else {
-            transaction_map.insert(mem.name.clone(), 0);
+            transaction_map.insert(name.clone(), 0);
         }
     }
 
@@ -276,16 +312,16 @@ fn split_into_transaction(total_amount: Money, group: &Group,
         group.members.len() - if balance_rest { 0 } else { recvrs.0.len() },
     );
     let mut ms_idx = 0;
-    for mem in &group.members {
-        if let Some(recv) = recvrs.0.iter().find(|&el| el.member == mem.name) {
-            let x = transaction_map.get_mut(&mem.name).unwrap();
+    for (name, _) in &group.members {
+        if let Some(recv) = recvrs.0.iter().find(|&el| &el.member == name) {
+            let x = transaction_map.get_mut(name).unwrap();
             *x -= recv.amount.unwrap();
             if balance_rest {
                 *x -= moneysplit[ms_idx];
                 ms_idx += 1;
             }
         } else {
-            let x = transaction_map.get_mut(&mem.name).unwrap();
+            let x = transaction_map.get_mut(name).unwrap();
             *x -= moneysplit[ms_idx];
             ms_idx += 1;
         }
@@ -301,6 +337,41 @@ mod group_tests {
     use super::*;
 
     #[test]
+    fn test_remove_member() {
+        let mut group = setup_group();
+        assert_eq!(group.members.len(), 4);
+        let r = group.remove(vec!["Alice".to_string()], false);
+        assert!(r.is_ok());
+        assert_eq!(group.members.len(), 3);
+        let mut group = setup_group();
+        let r = group.remove(vec!["Theseus".to_string()], false);
+        assert!(r.is_err());
+
+        let mut group = setup_group();
+        *group.members.get_mut("Alice").unwrap() = 100;
+        let r = group.remove(vec!["Alice".to_string()], true);
+        assert!(r.is_ok());
+        assert_eq!(group.members.len(), 3);
+    }
+
+    #[test]
+    fn test_add_member() {
+        let mut group = setup_group();
+        assert_eq!(group.members.len(), 4);
+        let r = group.add(vec!["Egbert".to_string()]);
+        assert!(r.is_ok(), "{:#?}", r.unwrap_err());
+        assert_eq!(group.members.len(), 5);
+        assert!(group.members.contains_key("Egbert"));
+        assert_eq!(group.members["Egbert"], 0);
+
+        let mut group = setup_group();
+        assert_eq!(group.members.len(), 4);
+        let r = group.add(vec!["Alice".to_string()]);
+        assert!(r.is_err());
+        assert_eq!(group.members.len(), 4);
+    }
+
+    #[test]
     fn test_apply_tachange() {
         let mut group =
             Group::new("testgroup".to_string(),
@@ -310,8 +381,8 @@ mod group_tests {
             [("Alice".into(), -10),
                 ("Bob".into(), 10)]);
         group.apply_tachange(tac);
-        assert_eq!(group.members[0].balance, -10);
-        assert_eq!(group.members[1].balance, 10);
+        assert_eq!(group.members["Alice"], -10);
+        assert_eq!(group.members["Bob"], 10);
     }
 
     #[test]
@@ -320,8 +391,9 @@ mod group_tests {
             Group::new("testgroup".to_string(),
                        vec!["Alice".to_string(), "Bob".to_string()],
                        None).unwrap();
-        group.members[0].balance = -10_00;
-        group.members[1].balance = 10_00;
+        *(group.members.get_mut("Alice").unwrap()) = -10_00;
+        *(group.members.get_mut("Bob").unwrap()) = 10_00;
+
         let tas = group.balance();
         assert_eq!(tas.len(), 1);
         assert_eq!(tas[0], Transaction::new("Alice", "Bob", 10_00));
@@ -334,10 +406,10 @@ mod group_tests {
                        vec!["Alice".to_string(), "Bob".to_string(),
                             "Charly".to_string(), "Django".to_string()],
                        None).unwrap();
-        group.members[0].balance = -1685;
-        group.members[1].balance = 316;
-        group.members[2].balance = 2117;
-        group.members[3].balance = -748;
+        *(group.members.get_mut("Alice").unwrap()) = -1685;
+        *(group.members.get_mut("Bob").unwrap()) = 316;
+        *(group.members.get_mut("Charly").unwrap()) = 2117;
+        *(group.members.get_mut("Django").unwrap()) = -748;
         let tas = group.balance();
         assert_eq!(tas[0], Transaction::new(&"Django".to_string(), &"Bob".to_string(), 316));
         assert_eq!(tas[1], Transaction::new(&"Django".to_string(), &"Charly".to_string(), 432));

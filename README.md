@@ -91,6 +91,18 @@ Deletes the group specified
 shows what has to be paid to whom and sets expenses such that everything
 is payed up afterwards, minimizing tedious transactions and amount of transactions
 
+### add
+`splitter add [--group {group name}] {member}+`
+adds members to a group, silently deduplicating members with the same name.
+not undoable.
+
+### remove
+`splitter remove [--group {group name}] [--force] {member}+`
+removes members from a group.
+Note that it is required for members to have a balance of 0.
+Fails with an error message if that is not the case and `--force` is not set.
+If more than one member is specified, `--force` applies to all of them.
+
 ## Project State
 
 - [x] commands
@@ -104,6 +116,7 @@ is payed up afterwards, minimizing tedious transactions and amount of transactio
 - [ ] other features
     - [ ] interactive prompt if called with no arguments
     - [ ] adding / removing members of a group after creation
+    - [ ] test cases that work on the executable directly
 
 ## About splitting
 
