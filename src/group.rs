@@ -1,9 +1,8 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use crate::error::InternalSplitterError;
+use crate::error::*;
 use crate::logging::{LogEntry, LoggedCommand};
-use crate::logging::LoggedCommand::Split;
 use crate::logic::{Money, Splitter, Target, Transaction, TransactionChange};
 use crate::money::Currency;
 
@@ -16,16 +15,21 @@ pub(crate) struct Group {
 }
 
 impl Group {
-    pub(crate) fn new(name: String, members: Vec<String>, currency: Option<Currency>) -> Result<Self, InternalSplitterError> {
+    pub(crate) fn new(name: String, members: Vec<String>, currency: Option<Currency>) -> Result<Self> {
         if members.is_empty() {
-            return Err(InternalSplitterError::InvalidSemantic("Group must have at least one member".into()));
+            return Err(ErrorKind::InvalidSemantic("Group must have at least one member".to_string())
+                .into());
         }
-        let mut membrs = {
+        let membrs = {
             let mut map = HashMap::with_capacity(members.len());
+            let regex = Regex::new(Splitter::NAME_REGEX).unwrap();
             for m in members {
-                assert!(Regex::new(Splitter::NAME_REGEX).unwrap().is_match(m.as_str()),
-                        "Name {} is not allowed for members", m);
-                map.insert(m, 0);
+                if regex.is_match(m.as_str()) {
+                    map.insert(m, 0);
+                } else {
+                    return Err(ErrorKind::InvalidName(format!("Name {} is not allowed for members", m))
+                        .into());
+                }
             }
             map
         };
@@ -36,20 +40,20 @@ impl Group {
             log: vec![],
         })
     }
-    pub(crate) fn get_log(&self, index: Option<usize>) -> Result<&LogEntry, InternalSplitterError> {
+    pub(crate) fn get_log(&self, index: Option<usize>) -> Result<&LogEntry> {
         if self.log.is_empty() {
-            return Err(InternalSplitterError::LogEntryNotFound);
+            return Err(ErrorKind::LogEntryNotFound.into());
         }
         let index = index.unwrap_or(self.log.len() - 1);
-        self.log.get(index).ok_or(InternalSplitterError::LogEntryNotFound)
+        self.log.get(index).ok_or(ErrorKind::LogEntryNotFound.into())
     }
-    pub(crate) fn remove_log(&mut self, index: Option<usize>) -> Result<LogEntry, InternalSplitterError> {
+    pub(crate) fn remove_log(&mut self, index: Option<usize>) -> Result<LogEntry> {
         if self.log.is_empty() {
-            return Err(InternalSplitterError::LogEntryNotFound);
+            return Err(ErrorKind::LogEntryNotFound.into());
         }
         let index = index.unwrap_or(self.log.len() - 1);
         if index >= self.log.len() {
-            return Err(InternalSplitterError::LogEntryNotFound);
+            return Err(ErrorKind::LogEntryNotFound.into());
         }
         Ok(self.log.remove(index))
     }
@@ -134,10 +138,11 @@ impl Group {
         }
         transactions
     }
-    pub(crate) fn add(&mut self, mut members: Vec<String>) -> Result<(), InternalSplitterError> {
+    pub(crate) fn add(&mut self, mut members: Vec<String>) -> Result<()> {
         let mut duplicates = vec![];
         let mut errors = vec![];
         for member in members.drain(..) {
+            #[allow(clippy::map_entry)]
             if self.members.contains_key(&member) {
                 duplicates.push(member);
             } else if !Regex::new(Splitter::NAME_REGEX)
@@ -150,11 +155,11 @@ impl Group {
         if duplicates.is_empty() && errors.is_empty() {
             Ok(())
         } else {
-            Err(InternalSplitterError::InvalidName(
-                format!("duplicates: {:#?}\ninvalid names: {:#?}", duplicates, errors)))
+            Err(ErrorKind::InvalidName(
+                format!("duplicates: {:#?}\ninvalid names: {:#?}", duplicates, errors)).into())
         }
     }
-    pub(crate) fn remove(&mut self, mut members: Vec<String>, force: bool) -> Result<(), InternalSplitterError> {
+    pub(crate) fn remove(&mut self, mut members: Vec<String>, force: bool) -> Result<()> {
         let mut errors = vec![];
         for member in members.drain(..) {
             if !self.members.contains_key(&member) ||
@@ -167,10 +172,10 @@ impl Group {
         if errors.is_empty() {
             Ok(())
         } else {
-            Err(InternalSplitterError::InvalidName(
+            Err(ErrorKind::InvalidName(
                 format!("Could not remove some members: Probably they either have to pay money, get money,\
                  or they do not appear in the list:\n{:?}", errors)
-            ))
+            ).into())
         }
     }
     pub(crate) fn apply_tachange(&mut self, tac: TransactionChange) {
@@ -178,7 +183,7 @@ impl Group {
             *balance += tac.get(name.as_str()).unwrap();
         }
     }
-    pub(crate) fn log_pay_transaction(&mut self, amount: i64, from: String, to: String) -> Result<(), InternalSplitterError> {
+    pub(crate) fn log_pay_transaction(&mut self, amount: i64, from: String, to: String) -> Result<()> {
         // calculate transaction
         let mut transaction = HashMap::with_capacity(2);
         transaction.insert(from.clone(), -amount);
@@ -199,7 +204,7 @@ impl Group {
             }
         }
         if found_both != 2 {
-            return Err(InternalSplitterError::MemberNotFound(format!("Either {from} or {to} do not exists within this group")));
+            return Err(ErrorKind::MemberNotFound(format!("Either {from} or {to} do not exists within this group")).into());
         }
 
         // log transaction
@@ -213,7 +218,7 @@ impl Group {
     /// the current member's balances
     pub(crate) fn split(&mut self, amount: Money,
                         from: Vec<String>, to: Vec<String>, name: String, balance_rest: bool)
-                        -> Result<(), InternalSplitterError>
+                        -> Result<()>
     {
         let (transaction, from, to) =
             split_into_transaction(amount, self, from.clone(), to.clone(), balance_rest)?;
@@ -267,20 +272,20 @@ fn split_equal_among(cents: Money, among: usize) -> Vec<Money> {
 /// should share the rest of the bill with them
 fn split_into_transaction(total_amount: Money, group: &Group,
                           from: Vec<String>, to: Vec<String>, balance_rest: bool)
-                          -> Result<(TransactionChange, Vec<Target>, Vec<Target>), InternalSplitterError> {
+                          -> Result<(TransactionChange, Vec<Target>, Vec<Target>)> {
     let givers = Target::parse_multiple(from, total_amount)?;
     let recvrs = Target::parse_multiple(to, total_amount)?;
     if recvrs.0.iter().any(|el| el.amount.is_none()) {
-        return Err(InternalSplitterError::InvalidTargetFormat("Amounts for --to must be specified explicitly".to_string()));
+        return Err(ErrorKind::InvalidTargetFormat("Amounts for --to must be specified explicitly".to_string()).into());
     } else if givers.0.iter().fold(0i64, |a, b| a.saturating_add(b.amount.unwrap_or(i64::MAX))) <=
         recvrs.0.iter().fold(0, |a, b| b.amount.unwrap() + a) {
-        return Err(InternalSplitterError::InvalidSemantic(
+        return Err(ErrorKind::InvalidSemantic(
             "Amounts of --from directives must either contain a catch-all or be >= amounts specified by --to".to_string()
-        ));
+        ).into());
     } else if
     recvrs.0.iter().any(|el| !group.members.contains_key(&el.member)) ||
         givers.0.iter().any(|el| !group.members.contains_key(&el.member)) {
-        return Err(InternalSplitterError::InvalidName(format!("Please only specify members within the group")));
+        return Err(ErrorKind::MemberNotFound(format!("One or more of the Receivers or Givers are not within group {}", group.name)).into());
     }
     // normalize givers to contain entries for all members of the group
     let moneysplit =
@@ -289,7 +294,7 @@ fn split_into_transaction(total_amount: Money, group: &Group,
     let mut transaction_map = HashMap::with_capacity(group.members.len());
 
     // positively add all the froms
-    for (name, _) in &group.members {
+    for name in group.members.keys() {
         if let Some(giver) = givers.0.iter().find(|&target| &target.member == name)
         {
             if let Some(amount) = giver.amount {
@@ -312,7 +317,7 @@ fn split_into_transaction(total_amount: Money, group: &Group,
         group.members.len() - if balance_rest { 0 } else { recvrs.0.len() },
     );
     let mut ms_idx = 0;
-    for (name, _) in &group.members {
+    for name in group.members.keys() {
         if let Some(recv) = recvrs.0.iter().find(|&el| &el.member == name) {
             let x = transaction_map.get_mut(name).unwrap();
             *x -= recv.amount.unwrap();

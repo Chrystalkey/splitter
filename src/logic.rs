@@ -10,8 +10,7 @@ use brotli::{CompressorReader, Decompressor};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use crate::config::SubCommand;
-use crate::error::InternalSplitterError;
-use crate::error::InternalSplitterError::GroupNotFound;
+use crate::error::*;
 use crate::group::Group;
 
 pub(crate) type Money = i64;
@@ -51,7 +50,7 @@ impl SplitterState {
     }
 
     /// get a reference to the group or panic
-    fn get_group(&self, group_name: Option<String>) -> Result<&Group, InternalSplitterError> {
+    fn get_group(&self, group_name: Option<String>) -> Result<&Group> {
         let group = match group_name {
             None => self.groups.get(self.current_group.unwrap_or(0)),
             Some(name) => self.groups.iter().find(|&gn| gn.name == name)
@@ -59,10 +58,10 @@ impl SplitterState {
         if let Some(g) = group {
             Ok(g)
         } else {
-            Err(GroupNotFound)
+            Err(ErrorKind::GroupNotFound.into())
         }
     }
-    fn get_group_mut(&mut self, group_name: Option<String>) -> Result<&mut Group, InternalSplitterError> {
+    fn get_group_mut(&mut self, group_name: Option<String>) -> Result<&mut Group> {
         let group = match group_name {
             None => self.groups.get_mut(self.current_group.unwrap_or(0)),
             Some(name) => self.groups.iter_mut().find(|gn| gn.name == name)
@@ -70,12 +69,12 @@ impl SplitterState {
         if let Some(g) = group {
             Ok(g)
         } else {
-            Err(GroupNotFound)
+            Err(ErrorKind::GroupNotFound.into())
         }
     }
-    fn get_group_idx(&mut self, group_name: Option<String>) -> Result<usize, InternalSplitterError> {
+    fn get_group_idx(&mut self, group_name: Option<String>) -> Result<usize> {
         if self.groups.is_empty() {
-            return Err(GroupNotFound);
+            return Err(ErrorKind::GroupNotFound.into());
         }
         let gidx = match group_name {
             None => self.current_group.unwrap_or(0),
@@ -83,14 +82,14 @@ impl SplitterState {
                 let idx = self.groups.iter().enumerate().find(|(_, g)|
                     g.name == name).map(|(n, _)| n);
                 if idx.is_none() {
-                    return Err(GroupNotFound);
+                    return Err(ErrorKind::GroupNotFound.into());
                 }
                 idx.unwrap()
             }
         };
         Ok(gidx)
     }
-    fn delete_group(&mut self, group_name: String, yes: bool) -> Result<(), InternalSplitterError> {
+    fn delete_group(&mut self, group_name: String, yes: bool) -> Result<()> {
         println!("This will delete the group '{}' forever with no more undo options available.\n",
                  group_name);
         {
@@ -117,6 +116,7 @@ impl SplitterState {
 
 #[cfg(test)]
 mod splitterstate_tests {
+    use std::any::Any;
     use crate::group::Group;
     use super::*;
 
@@ -149,7 +149,7 @@ mod splitterstate_tests {
         assert_eq!(splitterstate.groups.len(), 1);
         let r = splitterstate.delete_group("txt".to_string(), true);
         assert!(r.is_err());
-        assert_eq!(r.unwrap_err(), InternalSplitterError::GroupNotFound);
+        assert_eq!(r.unwrap_err().0.type_id(), ErrorKind::GroupNotFound.type_id());
     }
 }
 
@@ -163,11 +163,11 @@ pub(crate) struct Target {
 
 impl Target {
     /// Parses a target directive specified via `--from` or `--to` into a Target Struct
-    fn parse(input: &str, total_money: i64) -> Result<Self, InternalSplitterError> {
+    fn parse(input: &str, total_money: i64) -> Result<Self> {
         let in_split: Vec<_> = input.trim_end_matches('%').split(':').collect();
         if in_split[0].is_empty() {
-            return Err(InternalSplitterError::InvalidTargetFormat(
-                "Please use the format <name>:[<number>[%]]. (maybe you forgot ':'?".to_string()));
+            return Err(ErrorKind::InvalidTargetFormat(
+                "Please use the format <name>:[<number>[%]]. (maybe you forgot ':'?".to_string()).into());
         }
         if in_split.len() == 2 {
             let amount = if input.ends_with('%') {
@@ -185,15 +185,17 @@ impl Target {
             })
         } else if in_split.len() == 1 {
             if !Regex::new(Splitter::NAME_REGEX).unwrap().is_match(in_split[0]) {
-                return Err(InternalSplitterError::InvalidName(format!("Name {} is not valid.", in_split[0])));
+                return Err(ErrorKind::InvalidName(format!("Name {} is not valid.", in_split[0])).into());
             }
             Ok(Self {
                 member: in_split[0].to_owned(),
                 amount: None,
             })
         } else {
-            Err(InternalSplitterError::InvalidTargetFormat(
-                "Please use the format <name>:[<number>[%]]. (maybe you forgot ':'?".to_string()))
+            Err(ErrorKind::InvalidTargetFormat(
+                "Please use the format <name>:[<number>[%]]. (maybe you forgot ':'?".to_string())
+                .into()
+            )
         }
     }
     /// Parses entries that originate with --from or --to arguments.
@@ -201,7 +203,7 @@ impl Target {
     /// None means they did not specify an amount.
     /// The second return value is the total amount that was explicitly given
     /// The third return value is the number of wildcard givers
-    pub(crate) fn parse_multiple(raw_targets: Vec<String>, total_amount: i64) -> Result<(Vec<Target>, i64, usize), InternalSplitterError> {
+    pub(crate) fn parse_multiple(raw_targets: Vec<String>, total_amount: i64) -> Result<(Vec<Target>, i64, usize)> {
         let mut targets_parsed = Vec::with_capacity(raw_targets.len());
         let mut summed = 0i64;
         let mut wildcard_givers = 0usize;
@@ -212,10 +214,10 @@ impl Target {
             wildcard_givers += if t_amount.is_none() { 1 } else { 0 };
         }
         if summed.abs() > total_amount {
-            return Err(InternalSplitterError::InvalidSemantic(
+            return Err(ErrorKind::InvalidSemantic(
                 format!("Error: The amounts specified with '--from' or '--to' sum up to more than the total amount: {} vs {}",
                         summed, total_amount)
-            ));
+            ).into());
         }
         Ok((targets_parsed, summed, wildcard_givers))
     }
@@ -330,7 +332,7 @@ impl Splitter {
             false
         }
     }
-    fn balance(&mut self, group: Option<String>) -> Result<(), InternalSplitterError> {
+    fn balance(&mut self, group: Option<String>) -> Result<()> {
         let group = self.state.get_group_mut(group)?;
         let mut transactions = group.balance();
         println!("The following transactions are recommended:");
@@ -353,7 +355,7 @@ impl Splitter {
         Ok(())
     }
 
-    pub(crate) fn run(&mut self, command: SubCommand) -> Result<(), InternalSplitterError> {
+    pub(crate) fn run(&mut self, command: SubCommand) -> Result<()> {
         match command {
             SubCommand::Add { group, members } => {
                 let group = self.state.get_group_mut(group)?;
@@ -365,7 +367,7 @@ impl Splitter {
             }
             SubCommand::Create { name, members } => {
                 if !Regex::new(Splitter::NAME_REGEX).unwrap().is_match(name.as_str()) {
-                    return Err(InternalSplitterError::InvalidName(name));
+                    return Err(ErrorKind::InvalidName(name).into());
                 }
                 self.state.groups.push(Group::new(name, members, None)?);
                 self.state.current_group = Some(self.state.groups.len() - 1);
@@ -454,7 +456,7 @@ impl Splitter {
         dec_data
     }
 
-    pub(crate) fn save(&self) -> Result<(), InternalSplitterError> {
+    pub(crate) fn save(&self) -> Result<()> {
         let raw = serde_yaml::to_string(&self.state)?;
         let result = Self::compress(raw);
         let mut file = std::fs::File::create(self.db_path.as_path())?;

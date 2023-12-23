@@ -1,38 +1,34 @@
-use std::io::Error;
-use std::num::ParseFloatError;
+use error_chain::error_chain;
 
-#[derive(Debug, PartialEq)]
-pub enum InternalSplitterError {
-    InvalidNumberFormat(String),
-    InvalidTargetFormat(String),
-    InvalidSemantic(String),
-    InvalidName(String),
-    DatabaseReadError(String),
-    FileError(String),
-    GroupNotFound,
-    MemberNotFound(String),
-    LogEntryNotFound,
-}
-// todo: impl Display for InternalSplitterError
-
-impl From<ParseFloatError> for InternalSplitterError {
-    fn from(value: ParseFloatError) -> Self {
-        Self::InvalidNumberFormat(value.to_string())
+error_chain! {
+    errors{
+        InvalidTargetFormat(s: String){
+            description("Invalid Format for the from or to directives"),
+            display("Invalid Target Format: {}", s)
+        }
+        InvalidSemantic(s: String){
+            description("Invalid Semantic"),
+            display("Invalid Semantic: {}", s)
+        }
+        InvalidName(s: String){
+            description("Invalid Name"),
+            display("Invalid Name: {}", s)
+        }
+        MemberNotFound(s: String){
+            description("Member not found"),
+            display("Member not found: {}", s)
+        }
+        GroupNotFound{
+            description("The requested Group could not be found")
+        }
+        LogEntryNotFound {
+            description("The requested Log Entry could not be found")
+        }
     }
-}
 
-impl From<Error> for InternalSplitterError {
-    fn from(value: Error) -> Self {
-        Self::FileError(
-            format!("{:?}", value)
-        )
-    }
-}
-
-impl From<serde_yaml::Error> for InternalSplitterError {
-    fn from(value: serde_yaml::Error) -> Self {
-        Self::DatabaseReadError(
-            format!("{:?}", value)
-        )
+    foreign_links{
+        IOError(std::io::Error);
+        InvalidNumberFormat(std::num::ParseFloatError);
+        YamlFormatError(serde_yaml::Error);
     }
 }
