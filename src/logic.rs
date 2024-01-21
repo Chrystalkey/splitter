@@ -370,7 +370,7 @@ impl Splitter {
                 if !Regex::new(Splitter::NAME_REGEX).unwrap().is_match(name.as_str()) {
                     return Err(ErrorKind::InvalidName(name).into());
                 }
-                if self.state.groups.iter().find(|thing| thing.name == name).is_some() {
+                if self.state.groups.iter().any(|thing| thing.name==name) {
                     bail!(ErrorKind::InvalidName(format!("Group already exists! {}", name)));
                 }
                 self.state.groups.push(Group::new(name, members, None)?);
