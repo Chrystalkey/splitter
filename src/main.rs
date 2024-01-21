@@ -2,6 +2,7 @@ use std::fs;
 use clap::Parser;
 use crate::config::Cli;
 use crate::logic::Splitter;
+use error::*;
 
 mod logic;
 mod config;
@@ -10,7 +11,7 @@ mod money;
 mod logging;
 mod group;
 
-fn main() {
+fn main() -> Result<()> {
     let cli = Cli::parse();
     if cli.is_empty() {
         todo!("Here you should enter an interactive command mode, still under development");
@@ -26,11 +27,8 @@ fn main() {
             cli.database.unwrap().into()
         };
         let mut logic = Splitter::new(dbpath);
-        let ret = logic.run(cli.command.unwrap());
-        if let Err(r) = ret {
-            eprintln!("{:?}", r);
-        } else {
-            logic.save().expect("Could not save the Internal State to disk");
-        }
+        logic.run(cli.command.unwrap())?;
+        logic.save()?;
     }
+    Ok(())
 }

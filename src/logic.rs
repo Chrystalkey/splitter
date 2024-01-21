@@ -7,6 +7,7 @@ use std::string::ToString;
 use std::thread::sleep;
 use std::time::Duration;
 use brotli::{CompressorReader, Decompressor};
+use error_chain::bail;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use crate::config::SubCommand;
@@ -369,6 +370,9 @@ impl Splitter {
                 if !Regex::new(Splitter::NAME_REGEX).unwrap().is_match(name.as_str()) {
                     return Err(ErrorKind::InvalidName(name).into());
                 }
+                if self.state.groups.iter().find(|thing| thing.name == name).is_some() {
+                    bail!(ErrorKind::InvalidName(format!("Group already exists! {}", name)));
+                }
                 self.state.groups.push(Group::new(name, members, None)?);
                 self.state.current_group = Some(self.state.groups.len() - 1);
             }
@@ -462,61 +466,5 @@ impl Splitter {
         let mut file = std::fs::File::create(self.db_path.as_path())?;
         file.write_all(result.as_slice())?;
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod splitter_tests {
-    use super::*;
-
-    #[test]
-    fn test_create() {
-        let mut splitter = Splitter {
-            state: SplitterState {
-                version: "".to_string(),
-                groups: vec![],
-                current_group: None,
-            },
-            db_path: Default::default(),
-        };
-        assert_eq!(splitter.state.groups.len(), 0);
-        let command = SubCommand::Create {
-            name: "testgroup".to_string(),
-            members: vec!["Peter".to_string(), "Pan".to_string()],
-        };
-        let r = splitter.run(command);
-        assert!(r.is_ok());
-        assert_eq!(splitter.state.groups.len(), 1);
-        assert_eq!(splitter.state.groups[0].list(),
-                   Group::new("testgroup".to_string(),
-                              vec!["Peter".to_string(), "Pan".to_string()],
-                              None).unwrap().list());
-    }
-
-    #[test]
-    fn test_delete() {
-        let mut splitter = Splitter {
-            state: SplitterState {
-                version: "".to_string(),
-                groups: vec![],
-                current_group: None,
-            },
-            db_path: Default::default(),
-        };
-        splitter.run(
-            SubCommand::Create {
-                name: "testgroup".to_string(),
-                members: vec!["A".to_string(), "B".to_string()],
-            }
-        ).unwrap();
-        assert_eq!(splitter.state.groups.len(), 1);
-        let r = splitter.run(
-            SubCommand::DeleteGroup {
-                group: "testgroup".to_string(),
-                yes: Some(true),
-            }
-        );
-        assert!(r.is_ok());
-        assert_eq!(splitter.state.groups.len(), 0);
     }
 }

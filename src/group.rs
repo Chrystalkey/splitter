@@ -458,25 +458,25 @@ mod group_tests {
 
     #[test]
     fn test_split_equal_among() {
-        // test positive values
-        // test "perfect" split
+        // tests positive values
+        // tests "perfect" split
         let result = split_equal_among(100, 10);
         for x in result {
             assert_eq!(x, 10);
         }
-        // test "imperfect" split
+        // tests "imperfect" split
         let result = split_equal_among(100, 9);
         let expected_vec = vec![12, 11, 11, 11, 11, 11, 11, 11, 11];
         for i in 0..expected_vec.len() {
             assert_eq!(result[i], expected_vec[i]);
         }
-        // test negative values
-        // test "perfect" split
+        // tests negative values
+        // tests "perfect" split
         let result = split_equal_among(-100, 10);
         for x in result {
             assert_eq!(x, -10);
         }
-        // test "imperfect" split
+        // tests "imperfect" split
         let result = split_equal_among(-100, 9);
         let expected_vec = vec![-12, -11, -11, -11, -11, -11, -11, -11, -11];
         for i in 0..expected_vec.len() {
