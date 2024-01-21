@@ -1,26 +1,26 @@
 stages:
-    - test
-    - build
+  - test
+  - build
 
 tests:
-    stage: test
-    image: rust
-    script:
-        - cargo test
+  stage: test
+  image: rust
+  script:
+    - cargo test
 
 build:
-    stage: build
-    image: rust
-    script:
-        - cargo build --release
-    artifacts:
-        - target/release/splitter
+  stage: build
+  image: rust
+  script:
+    - cargo build --release
+  artifacts:
+    - target/release/splitter
 
 documentation:
-    stage: build
-    image: rust
-    script:
-        - cargo doc
-    artifacts:
-        paths:
-            - target/doc
+  stage: build
+  image: rust
+  script:
+    - cargo doc
+  artifacts:
+    paths:
+      - target/doc
