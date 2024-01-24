@@ -7,7 +7,6 @@ use std::string::ToString;
 use std::thread::sleep;
 use std::time::Duration;
 use brotli::{CompressorReader, Decompressor};
-use error_chain::bail;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use crate::config::SubCommand;
@@ -52,38 +51,41 @@ impl SplitterState {
 
     /// get a reference to the group or panic
     fn get_group(&self, group_name: Option<String>) -> Result<&Group> {
-        let group = match group_name {
+        let group = match &group_name {
             None => self.groups.get(self.current_group.unwrap_or(0)),
-            Some(name) => self.groups.iter().find(|&gn| gn.name == name)
+            Some(name) => self.groups.iter().find(|&gn| gn.name == *name)
         };
         if let Some(g) = group {
             Ok(g)
         } else {
-            Err(ErrorKind::GroupNotFound.into())
+            Err(anyhow!(SplitterError::GroupNotFound))
+                .context(group_name.unwrap_or("None".to_string()))
         }
     }
     fn get_group_mut(&mut self, group_name: Option<String>) -> Result<&mut Group> {
-        let group = match group_name {
+        let group = match &group_name {
             None => self.groups.get_mut(self.current_group.unwrap_or(0)),
-            Some(name) => self.groups.iter_mut().find(|gn| gn.name == name)
+            Some(name) => self.groups.iter_mut().find(|gn| gn.name == *name)
         };
         if let Some(g) = group {
             Ok(g)
         } else {
-            Err(ErrorKind::GroupNotFound.into())
+            Err(anyhow!(SplitterError::GroupNotFound)).context(group_name.unwrap_or("None".to_string()))
         }
     }
     fn get_group_idx(&mut self, group_name: Option<String>) -> Result<usize> {
         if self.groups.is_empty() {
-            return Err(ErrorKind::GroupNotFound.into());
+            return Err(anyhow!(SplitterError::GroupNotFound))
+                .context(group_name.unwrap_or("None".to_string()));
         }
-        let gidx = match group_name {
+        let gidx = match &group_name {
             None => self.current_group.unwrap_or(0),
             Some(name) => {
                 let idx = self.groups.iter().enumerate().find(|(_, g)|
-                    g.name == name).map(|(n, _)| n);
+                    g.name == *name).map(|(n, _)| n);
                 if idx.is_none() {
-                    return Err(ErrorKind::GroupNotFound.into());
+                    return Err(anyhow!(SplitterError::GroupNotFound))
+                        .context(group_name.unwrap_or("None".to_string()));
                 }
                 idx.unwrap()
             }
@@ -117,7 +119,6 @@ impl SplitterState {
 
 #[cfg(test)]
 mod splitterstate_tests {
-    use std::any::Any;
     use crate::group::Group;
     use super::*;
 
@@ -150,7 +151,8 @@ mod splitterstate_tests {
         assert_eq!(splitterstate.groups.len(), 1);
         let r = splitterstate.delete_group("txt".to_string(), true);
         assert!(r.is_err());
-        assert_eq!(r.unwrap_err().0.type_id(), ErrorKind::GroupNotFound.type_id());
+        assert_eq!(r.unwrap_err()
+                       .downcast_ref(), Some(SplitterError::GroupNotFound).as_ref());
     }
 }
 
@@ -167,8 +169,8 @@ impl Target {
     fn parse(input: &str, total_money: i64) -> Result<Self> {
         let in_split: Vec<_> = input.trim_end_matches('%').split(':').collect();
         if in_split[0].is_empty() {
-            return Err(ErrorKind::InvalidTargetFormat(
-                "Please use the format <name>:[<number>[%]]. (maybe you forgot ':'?".to_string()).into());
+            return Err(anyhow!(SplitterError::InvalidTargetFormat))
+                .context("Please use the format <name>:[<number>[%]]. (maybe you forgot ':'?");
         }
         if in_split.len() == 2 {
             let amount = if input.ends_with('%') {
@@ -186,17 +188,17 @@ impl Target {
             })
         } else if in_split.len() == 1 {
             if !Regex::new(Splitter::NAME_REGEX).unwrap().is_match(in_split[0]) {
-                return Err(ErrorKind::InvalidName(format!("Name {} is not valid.", in_split[0])).into());
+                return Err(anyhow!(SplitterError::InvalidName))
+                    .context(in_split[0].to_string())
+                ;
             }
             Ok(Self {
                 member: in_split[0].to_owned(),
                 amount: None,
             })
         } else {
-            Err(ErrorKind::InvalidTargetFormat(
-                "Please use the format <name>:[<number>[%]]. (maybe you forgot ':'?".to_string())
-                .into()
-            )
+            Err(anyhow!(SplitterError::InvalidTargetFormat))
+                .context("Please use the format <name>:[<number>[%]]. (maybe you forgot ':'?")
         }
     }
     /// Parses entries that originate with --from or --to arguments.
@@ -215,10 +217,9 @@ impl Target {
             wildcard_givers += if t_amount.is_none() { 1 } else { 0 };
         }
         if summed.abs() > total_amount {
-            return Err(ErrorKind::InvalidSemantic(
-                format!("Error: The amounts specified with '--from' or '--to' sum up to more than the total amount: {} vs {}",
-                        summed, total_amount)
-            ).into());
+            return Err(anyhow!(SplitterError::LogicError))
+                .context(format!("Error: The amounts specified with '--from' or '--to' sum up to more than the total amount: {} vs {}",
+                                 summed, total_amount));
         }
         Ok((targets_parsed, summed, wildcard_givers))
     }
@@ -368,10 +369,12 @@ impl Splitter {
             }
             SubCommand::Create { name, members } => {
                 if !Regex::new(Splitter::NAME_REGEX).unwrap().is_match(name.as_str()) {
-                    return Err(ErrorKind::InvalidName(name).into());
+                    return Err(anyhow!(SplitterError::InvalidName))
+                        .context(name);
                 }
-                if self.state.groups.iter().any(|thing| thing.name==name) {
-                    bail!(ErrorKind::InvalidName(format!("Group already exists! {}", name)));
+                if self.state.groups.iter().any(|thing| thing.name == name) {
+                    return Err(anyhow!(SplitterError::InvalidName))
+                        .context(format!("Group already exists! {}", name));
                 }
                 self.state.groups.push(Group::new(name, members, None)?);
                 self.state.current_group = Some(self.state.groups.len() - 1);

@@ -34,7 +34,7 @@ mod integration {
             .unwrap()
             .wait();
         assert!(exit_status.is_ok());
-        assert!(exit_status.unwrap().success());
+        assert!(exit_status.as_ref().unwrap().success(), "Instead: {:?}", exit_status.unwrap().code());
         // existing group, should fail
         let exit_status = Command::new("cargo")
             .args(&["run", "--", "-d", DB_NAME, "create", "testgroup", "-a", "alice", "-a", "bob"])

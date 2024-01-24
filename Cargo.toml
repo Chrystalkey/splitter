@@ -6,11 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0.79"
 brotli = "3.4.0"
 chrono = "0.4.31"
 clap = { version = "4.4.6", features = ["derive"] }
 dirs = "5.0.1"
-error-chain = "0.12.4"
 regex = "1.9.6"
 rusqlite = "0.30.0"
 serde = { version = "1.0.192", features = ["derive"] }
