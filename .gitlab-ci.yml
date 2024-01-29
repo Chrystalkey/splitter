@@ -23,18 +23,21 @@ stages:          # List of stages for jobs, and their order of execution
 
 build-job:       # This job runs in the build stage, which runs first.
   stage: build
+  image: rust:latest
   script:
     - echo "Compiling the code..."
     - cargo build --release
     - echo "Compile complete."
 build-docs:
   stage: build
+  image: rust:latest
   script:
     - echo "Building Documentation..."
     - cargo doc
     - echo "Documentation Done"      
 unit-test-job:   # This job runs in the test stage.
   stage: test    # It only starts when the job in the build stage completes successfully.
+  image: rust:latest
   script:
     - echo "Running unit tests..."
     - cargo test
