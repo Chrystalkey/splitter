@@ -46,6 +46,8 @@ lint-test-job:   # This job also runs in the test stage.
   stage: test    # It can run at the same time as unit-test-job (in parallel).
   image: rust:latest
   script:
+    - echo "Installing Clippy"
+    - rustup component add clippy
     - echo "Linting code... This will take about 10 seconds."
     - cargo clippy
     - echo "No lint issues found."

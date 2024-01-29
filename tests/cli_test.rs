@@ -2,9 +2,6 @@
 mod integration {
     use std::fs;
     use std::io::{BufWriter, Write};
-    #[cfg(windows)]
-    use std::os::windows::fs::MetadataExt;
-
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
 
@@ -72,8 +69,8 @@ mod integration {
             let exit_status = child.wait();
             assert!(exit_status.is_ok());
             assert!(exit_status.unwrap().success());
-            assert!(fsize.file_size() >
-                fs::metadata(db_filename.as_str()).expect("Should have given file size").file_size());
+            assert!(fsize.len() >
+                fs::metadata(db_filename.as_str()).expect("Should have given file size").len());
             cleanup(db_filename.as_str());
         }
 
@@ -89,8 +86,8 @@ mod integration {
             let exit_status = child.wait();
             assert!(exit_status.is_ok());
             assert!(!exit_status.unwrap().success());
-            assert_eq!(fsize.file_size(),
-                       fs::metadata(db_filename.as_str()).expect("Should have given file size").file_size());
+            assert_eq!(fsize.len(),
+                       fs::metadata(db_filename.as_str()).expect("Should have given file size").len());
             cleanup(db_filename.as_str());
         }
 
@@ -111,8 +108,8 @@ mod integration {
             let exit_status = child.wait();
             assert!(exit_status.is_ok());
             assert!(!exit_status.unwrap().success());
-            assert_eq!(fsize.file_size(),
-                       fs::metadata(db_filename.as_str()).expect("Should have given file size").file_size());
+            assert_eq!(fsize.len(),
+                       fs::metadata(db_filename.as_str()).expect("Should have given file size").len());
             cleanup(db_filename.as_str());
         }
 
@@ -121,7 +118,7 @@ mod integration {
             create_group(db_filename.as_str());
             let fsize = fs::metadata(db_filename.as_str())
                 .expect("Should have given file size")
-                .file_size();
+                .len();
             let mut child = Command::new("cargo")
                 .args(&["run", "--", "-d", db_filename.as_str(), "delete-group", "testgroup"])
                 .stdin(Stdio::piped())
@@ -136,7 +133,7 @@ mod integration {
             assert!(exit_status.is_ok());
             assert!(exit_status.unwrap().success());
             assert!(fsize >
-                fs::metadata(db_filename.as_str()).expect("Should have given file size").file_size());
+                fs::metadata(db_filename.as_str()).expect("Should have given file size").len());
             cleanup(db_filename.as_str());
         }
     }
