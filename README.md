@@ -5,7 +5,7 @@ A command line money splitting application
 ## Usage
 
 The program should maintain a persistent storage on the pc, that can be specified, or defaulted.
-The Default Storage location is in  ~/.splitter
+The Default Storage location is in  ~/.config/splitter/default.db
 
 The Commands that are allowed are as follows:
 
